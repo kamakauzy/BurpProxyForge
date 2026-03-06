@@ -117,19 +117,17 @@ public final class ProviderRegistry
                 return ProviderResult.failure(exception.getMessage());
             }
             String region = trim(request.field("region"));
-            if (request.mockMode() || isBlank(targetUrl) || isBlank(request.field("accessKey")) || isBlank(request.field("secretKey")))
+            if (isBlank(targetUrl))
             {
-                String resolvedRegion = isBlank(region) ? "us-east-1" : region;
-                String fakeId = "mock-" + shortId();
-                ProxyEntry mockEntry = ProxyEntry.forwarder(
-                    ProviderType.AWS_FIREPROX,
-                    "Fireprox " + fakeId,
-                    "https://" + fakeId + ".execute-api." + resolvedRegion + ".amazonaws.com/proxy/",
-                    targetUrl,
-                    true);
-                mockEntry.providerResourceId = fakeId;
-                mockEntry.metadata.put("region", resolvedRegion);
-                return ProviderResult.success("Created a local mock Fireprox endpoint only. No AWS API Gateway was deployed for " + defaultTarget(targetUrl), mockEntry);
+                return ProviderResult.failure("AWS Fireprox requires a target URL.");
+            }
+            if (isBlank(request.field("accessKey")) || isBlank(request.field("secretKey")))
+            {
+                return ProviderResult.failure("AWS Fireprox requires both accessKey and secretKey.");
+            }
+            if (isBlank(region))
+            {
+                return ProviderResult.failure("AWS Fireprox requires a region.");
             }
 
             try (ApiGatewayClient client = apiGatewayClient(request.fields()))
@@ -198,8 +196,7 @@ public final class ProviderRegistry
                     ProviderType.AWS_FIREPROX,
                     apiName,
                     "https://" + apiId + ".execute-api." + region + ".amazonaws.com/proxy/",
-                    trimTrailingSlash(targetUrl),
-                    false);
+                    trimTrailingSlash(targetUrl));
                 entry.providerResourceId = apiId;
                 entry.metadata.put("region", region);
                 entry.metadata.put("apiName", apiName);
@@ -217,10 +214,14 @@ public final class ProviderRegistry
         {
             if (isBlank(fields.get("accessKey")) || isBlank(fields.get("secretKey")))
             {
-                return ProviderResult.successList("No AWS credentials supplied; returning local/mock view only.", List.of());
+                return ProviderResult.failure("AWS list requires both accessKey and secretKey.");
             }
 
             String region = trim(fields.get("region"));
+            if (isBlank(region))
+            {
+                return ProviderResult.failure("AWS list requires a region.");
+            }
             try (ApiGatewayClient client = apiGatewayClient(fields))
             {
                 List<ProxyEntry> entries = new ArrayList<>();
@@ -236,8 +237,7 @@ public final class ProviderRegistry
                         ProviderType.AWS_FIREPROX,
                         name,
                         "https://" + api.id() + ".execute-api." + region + ".amazonaws.com/proxy/",
-                        "",
-                        false);
+                        "");
                     entry.providerResourceId = api.id();
                     entry.metadata.put("region", region);
                     entries.add(entry);
@@ -254,9 +254,13 @@ public final class ProviderRegistry
         @Override
         public ProviderResult delete(ProxyEntry proxyEntry, Map<String, String> fields)
         {
-            if (proxyEntry.mock)
+            if (isBlank(fields.get("accessKey")) || isBlank(fields.get("secretKey")))
             {
-                return ProviderResult.success("Removed mock Fireprox endpoint " + proxyEntry.name, proxyEntry);
+                return ProviderResult.failure("AWS delete requires both accessKey and secretKey.");
+            }
+            if (isBlank(fields.get("region")))
+            {
+                return ProviderResult.failure("AWS delete requires a region.");
             }
 
             try (ApiGatewayClient client = apiGatewayClient(fields))
@@ -314,18 +318,13 @@ public final class ProviderRegistry
             String accountId = trim(request.field("accountId"));
             String apiToken = trim(request.field("apiToken"));
 
-            if (request.mockMode() || isBlank(targetUrl) || isBlank(accountId) || isBlank(apiToken))
+            if (isBlank(targetUrl))
             {
-                String fakeName = "proxyforge-" + shortId();
-                ProxyEntry entry = ProxyEntry.forwarder(
-                    ProviderType.CLOUDFLARE_FLAREPROX,
-                    "Flareprox " + fakeName,
-                    workersDevEndpoint(fakeName, defaultString(workersSubdomain, "example")),
-                    targetUrl,
-                    true);
-                entry.providerResourceId = fakeName;
-                entry.metadata.put("workersSubdomain", workersSubdomain);
-                return ProviderResult.success("Created a local mock Cloudflare endpoint only. No Cloudflare Worker was deployed for " + defaultTarget(targetUrl), entry);
+                return ProviderResult.failure("Cloudflare deployment requires a target URL.");
+            }
+            if (isBlank(accountId) || isBlank(apiToken))
+            {
+                return ProviderResult.failure("Cloudflare deployment requires both accountId and apiToken.");
             }
 
             if (isBlank(workersSubdomain))
@@ -370,8 +369,7 @@ public final class ProviderRegistry
                     ProviderType.CLOUDFLARE_FLAREPROX,
                     "Flareprox " + scriptName,
                     workersDevEndpoint(scriptName, workersSubdomain),
-                    trimTrailingSlash(targetUrl),
-                    false);
+                    trimTrailingSlash(targetUrl));
                 entry.providerResourceId = scriptName;
                 entry.metadata.put("workersSubdomain", workersSubdomain);
                 entry.metadata.put("targetUrl", targetUrl);
@@ -400,7 +398,7 @@ public final class ProviderRegistry
             }
             if (isBlank(accountId) || isBlank(apiToken))
             {
-                return ProviderResult.successList("No Cloudflare credentials supplied; returning local/mock view only.", List.of());
+                return ProviderResult.failure("Cloudflare list requires both accountId and apiToken.");
             }
             if (isBlank(workersSubdomain))
             {
@@ -440,8 +438,7 @@ public final class ProviderRegistry
                         ProviderType.CLOUDFLARE_FLAREPROX,
                         "Flareprox " + id,
                         workersDevEndpoint(id, workersSubdomain),
-                        "",
-                        false);
+                        "");
                     entry.providerResourceId = id;
                     entry.metadata.put("workersSubdomain", workersSubdomain);
                     entries.add(entry);
@@ -458,9 +455,9 @@ public final class ProviderRegistry
         @Override
         public ProviderResult delete(ProxyEntry proxyEntry, Map<String, String> fields)
         {
-            if (proxyEntry.mock)
+            if (isBlank(fields.get("accountId")) || isBlank(fields.get("apiToken")))
             {
-                return ProviderResult.success("Removed mock Cloudflare Worker " + proxyEntry.name, proxyEntry);
+                return ProviderResult.failure("Cloudflare delete requires both accountId and apiToken.");
             }
 
             try
@@ -503,22 +500,13 @@ public final class ProviderRegistry
             String instanceType = trim(request.field("instanceType"));
             String apiToken = trim(request.field("apiToken"));
 
-            if (request.mockMode() || isBlank(apiToken))
+            if (isBlank(vendor))
             {
-                ProxyEntry entry = ProxyEntry.networkProxy(
-                    ProviderType.VPS_FORGE,
-                    ProxyMode.SOCKS5,
-                    "VPS Forge " + shortId(),
-                    "198.51.100." + (10 + (int) (Math.random() * 40)),
-                    1080,
-                    "proxyforge",
-                    "proxyforge",
-                    true);
-                entry.providerResourceId = "mock-" + shortId();
-                entry.metadata.put("vendor", vendor);
-                entry.metadata.put("region", region);
-                entry.metadata.put("instanceType", instanceType);
-                return ProviderResult.success("Created mock VPS proxy for " + vendor, entry);
+                return ProviderResult.failure("VPS deployment requires a vendor selection.");
+            }
+            if (isBlank(apiToken) && !"awsec2".equals(vendor))
+            {
+                return ProviderResult.failure("VPS deployment requires an API token for the selected vendor.");
             }
 
             return switch (vendor)
@@ -539,11 +527,6 @@ public final class ProviderRegistry
         @Override
         public ProviderResult delete(ProxyEntry proxyEntry, Map<String, String> fields)
         {
-            if (proxyEntry.mock)
-            {
-                return ProviderResult.success("Removed mock VPS entry " + proxyEntry.name, proxyEntry);
-            }
-
             String vendor = normalizeVendor(proxyEntry.metadata.get("vendor"));
             try
             {
@@ -598,8 +581,7 @@ public final class ProviderRegistry
                     host,
                     3128,
                     "",
-                    password,
-                    false);
+                    password);
                 entry.providerResourceId = dropletId;
                 entry.metadata.put("vendor", "digitalocean");
                 entry.metadata.put("region", region);
@@ -651,8 +633,7 @@ public final class ProviderRegistry
                     host,
                     3128,
                     "",
-                    password,
-                    false);
+                    password);
                 entry.providerResourceId = instanceId;
                 entry.metadata.put("vendor", "linode");
                 entry.metadata.put("region", region);
@@ -716,8 +697,7 @@ public final class ProviderRegistry
                     "",
                     3128,
                     "",
-                    password,
-                    false);
+                    password);
                 entry.providerResourceId = instanceId;
                 entry.status = ProxyForgeModels.ProxyStatus.DEPLOYING;
                 entry.metadata.put("vendor", "awsec2");

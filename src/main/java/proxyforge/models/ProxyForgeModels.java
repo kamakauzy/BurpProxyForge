@@ -61,7 +61,6 @@ public final class ProxyForgeModels
         ACTIVE,
         VALIDATING,
         FAILED,
-        MOCK,
         DELETING,
         STOPPED
     }
@@ -108,7 +107,6 @@ public final class ProxyForgeModels
 
     public static final class ProviderFormState
     {
-        public boolean mockMode = true;
         public Map<String, String> fields = new LinkedHashMap<>();
     }
 
@@ -198,7 +196,6 @@ public final class ProxyForgeModels
         public String username = "";
         public String password = "";
         public boolean enabled = true;
-        public boolean mock;
         public Instant createdAt = Instant.now();
         public Instant lastValidatedAt;
         public Instant lastUsedAt;
@@ -212,7 +209,7 @@ public final class ProxyForgeModels
         {
         }
 
-        public static ProxyEntry forwarder(ProviderType providerType, String name, String forwarderBaseUrl, String targetBaseUrl, boolean mock)
+        public static ProxyEntry forwarder(ProviderType providerType, String name, String forwarderBaseUrl, String targetBaseUrl)
         {
             ProxyEntry entry = new ProxyEntry();
             entry.providerType = providerType;
@@ -220,8 +217,7 @@ public final class ProxyForgeModels
             entry.name = name;
             entry.forwarderBaseUrl = Objects.requireNonNullElse(forwarderBaseUrl, "");
             entry.targetBaseUrl = Objects.requireNonNullElse(targetBaseUrl, "");
-            entry.mock = mock;
-            entry.status = mock ? ProxyStatus.MOCK : ProxyStatus.ACTIVE;
+            entry.status = ProxyStatus.ACTIVE;
             entry.endpointScheme = "https";
             return entry;
         }
@@ -233,8 +229,7 @@ public final class ProxyForgeModels
             String host,
             int port,
             String username,
-            String password,
-            boolean mock)
+            String password)
         {
             ProxyEntry entry = new ProxyEntry();
             entry.providerType = providerType;
@@ -244,8 +239,7 @@ public final class ProxyForgeModels
             entry.endpointPort = port;
             entry.username = Objects.requireNonNullElse(username, "");
             entry.password = Objects.requireNonNullElse(password, "");
-            entry.mock = mock;
-            entry.status = mock ? ProxyStatus.MOCK : ProxyStatus.ACTIVE;
+            entry.status = ProxyStatus.ACTIVE;
             entry.endpointScheme = proxyMode == ProxyMode.SOCKS5 ? "socks5" : "http";
             return entry;
         }
@@ -268,7 +262,7 @@ public final class ProxyForgeModels
         public void markValidation(boolean success, String message)
         {
             lastValidatedAt = Instant.now();
-            status = success ? (mock ? ProxyStatus.MOCK : ProxyStatus.ACTIVE) : ProxyStatus.FAILED;
+            status = success ? ProxyStatus.ACTIVE : ProxyStatus.FAILED;
             lastError = success ? "" : Objects.requireNonNullElse(message, "Validation failed");
         }
 
@@ -277,10 +271,7 @@ public final class ProxyForgeModels
             requestsServed++;
             successfulRequests++;
             lastUsedAt = Instant.now();
-            if (status != ProxyStatus.MOCK)
-            {
-                status = ProxyStatus.ACTIVE;
-            }
+            status = ProxyStatus.ACTIVE;
         }
 
         public void markRequestFailure(String message)
@@ -293,7 +284,7 @@ public final class ProxyForgeModels
         }
     }
 
-    public record DeployRequest(ProviderType providerType, Map<String, String> fields, boolean mockMode)
+    public record DeployRequest(ProviderType providerType, Map<String, String> fields)
     {
         public String field(String key)
         {

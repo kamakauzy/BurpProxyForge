@@ -67,8 +67,7 @@ class LocalProxyServerTest
             "127.0.0.1",
             upstreamPort,
             "",
-            "",
-            false);
+            "");
         state.proxies.add(entry);
 
         ProxyRotationEngine engine = new ProxyRotationEngine(state);
@@ -98,8 +97,8 @@ class LocalProxyServerTest
     {
         ExtensionState state = new ExtensionState();
         state.settings.rotationStrategy = RotationStrategy.ROUND_ROBIN;
-        state.proxies.add(ProxyEntry.networkProxy(ProviderType.VPS_FORGE, ProxyMode.HTTP_PROXY, "one", "127.0.0.1", 9001, "", "", true));
-        state.proxies.add(ProxyEntry.networkProxy(ProviderType.VPS_FORGE, ProxyMode.HTTP_PROXY, "two", "127.0.0.1", 9002, "", "", true));
+        state.proxies.add(ProxyEntry.networkProxy(ProviderType.VPS_FORGE, ProxyMode.HTTP_PROXY, "one", "127.0.0.1", 9001, "", ""));
+        state.proxies.add(ProxyEntry.networkProxy(ProviderType.VPS_FORGE, ProxyMode.HTTP_PROXY, "two", "127.0.0.1", 9002, "", ""));
 
         ProxyRotationEngine engine = new ProxyRotationEngine(state);
         ProxyEntry first = engine.chooseProxy("a.example").proxy();
@@ -119,8 +118,7 @@ class LocalProxyServerTest
             ProviderType.CLOUDFLARE_FLAREPROX,
             "flareprox",
             "https://flare.example.workers.dev/",
-            "https://example.com",
-            true));
+            "https://example.com"));
         ProxyEntry connectCapable = ProxyEntry.networkProxy(
             ProviderType.VPS_FORGE,
             ProxyMode.HTTP_PROXY,
@@ -128,8 +126,7 @@ class LocalProxyServerTest
             "127.0.0.1",
             9001,
             "",
-            "",
-            true);
+            "");
         state.proxies.add(connectCapable);
 
         ProxyRotationEngine engine = new ProxyRotationEngine(state);
@@ -145,8 +142,7 @@ class LocalProxyServerTest
             ProviderType.CLOUDFLARE_FLAREPROX,
             "flareprox",
             "https://flare.example.workers.dev/",
-            "https://example.com",
-            true));
+            "https://example.com"));
 
         ProxyRotationEngine engine = new ProxyRotationEngine(state);
         assertNull(engine.chooseProxy("example.com", true).proxy());

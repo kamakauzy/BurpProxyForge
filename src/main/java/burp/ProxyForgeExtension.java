@@ -215,23 +215,23 @@ public class ProxyForgeExtension implements BurpExtension
         }
 
         @Override
-        public ProviderResult deploy(ProviderType providerType, Map<String, String> fields, boolean mockMode)
+        public ProviderResult deploy(ProviderType providerType, Map<String, String> fields)
         {
-            updateProviderFormState(providerType, mockMode, fields);
-            return providerRegistry.deploy(new DeployRequest(providerType, fields, mockMode));
+            updateProviderFormState(providerType, fields);
+            return providerRegistry.deploy(new DeployRequest(providerType, fields));
         }
 
         @Override
-        public ProviderResult list(ProviderType providerType, Map<String, String> fields, boolean mockMode)
+        public ProviderResult list(ProviderType providerType, Map<String, String> fields)
         {
-            updateProviderFormState(providerType, mockMode, fields);
+            updateProviderFormState(providerType, fields);
             return providerRegistry.list(providerType, fields);
         }
 
         @Override
-        public ProviderResult deleteProxy(ProxyEntry proxyEntry, Map<String, String> fields, boolean mockMode)
+        public ProviderResult deleteProxy(ProxyEntry proxyEntry, Map<String, String> fields)
         {
-            updateProviderFormState(proxyEntry.providerType, mockMode, fields);
+            updateProviderFormState(proxyEntry.providerType, fields);
             ProviderResult result = providerRegistry.delete(proxyEntry, fields);
             if (result.success())
             {
@@ -247,10 +247,9 @@ public class ProxyForgeExtension implements BurpExtension
         }
 
         @Override
-        public synchronized void updateProviderFormState(ProviderType providerType, boolean mockMode, Map<String, String> fields)
+        public synchronized void updateProviderFormState(ProviderType providerType, Map<String, String> fields)
         {
             ProviderFormState providerFormState = state.providerFormStates.computeIfAbsent(providerType, ignored -> new ProviderFormState());
-            providerFormState.mockMode = mockMode;
             providerFormState.fields.clear();
             providerFormState.fields.putAll(fields);
             persistAndRefresh();

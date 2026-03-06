@@ -10,7 +10,6 @@ import proxyforge.models.ProxyForgeModels.ScopeRule;
 import proxyforge.utils.ProxyForgeLogger;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -199,8 +198,8 @@ public final class ProxyForgeTab extends JPanel
         JTextArea textArea = new JTextArea("""
             ProxyForge quick start
 
-            1. Configure one provider panel and leave Mock Mode enabled if you do not have live cloud credentials.
-            2. Click Deploy to add one or more proxies into the pool.
+            1. Configure one provider panel with valid cloud credentials and required deployment settings.
+            2. Click Deploy to create one or more provider-managed proxies and add them to the pool.
             3. Set Burp upstream proxy rules to forward in-scope traffic to 127.0.0.1:8081 (or your configured local port).
             4. Choose a rotation strategy, then click Start / Restart Proxy.
             5. Use Validate All to health-check the pool and Rotate Now to force a different selection.
@@ -279,7 +278,7 @@ public final class ProxyForgeTab extends JPanel
                 case CLOUDFLARE_FLAREPROX -> cloudflarePanel;
                 case VPS_FORGE -> vpsPanel;
             };
-            ProviderResult result = actions.deleteProxy(selected, providerPanel.currentFields(), providerPanel.mockMode());
+            ProviderResult result = actions.deleteProxy(selected, providerPanel.currentFields());
             showResult(result);
             refresh();
         });
@@ -454,7 +453,7 @@ public final class ProxyForgeTab extends JPanel
             ProxyForge usage
 
             Provider panels
-            - Deploy creates a proxy or forwarder and adds it to the pool.
+            - Deploy creates a provider resource and adds the resulting proxy or forwarder to the pool.
             - List retrieves matching provider resources when live credentials are present.
             - Delete Selected removes the highlighted pool entry and triggers provider cleanup.
 
@@ -471,10 +470,9 @@ public final class ProxyForgeTab extends JPanel
             - Proxy port: your configured local port (default 8081)
 
             Validation
-            - Validate All opens a direct health check for each pool entry.
-            - Mock mode providers return healthy stub entries without touching cloud APIs.
+            - Validate All opens a direct health check for each pool entry using the real deployed endpoint.
             - Fireprox / Flareprox entries are HTTP forwarders. They do not support HTTPS CONNECT tunneling like a regular upstream proxy.
-            - Enter target URLs with a scheme, for example https://example.com.
+            - Enter target URLs with an explicit scheme such as https:// or http://.
             """);
         textArea.setEditable(false);
         textArea.setLineWrap(true);
@@ -514,15 +512,15 @@ public final class ProxyForgeTab extends JPanel
     {
         ExtensionState currentState();
 
-        ProviderResult deploy(ProviderType providerType, Map<String, String> fields, boolean mockMode);
+        ProviderResult deploy(ProviderType providerType, Map<String, String> fields);
 
-        ProviderResult list(ProviderType providerType, Map<String, String> fields, boolean mockMode);
+        ProviderResult list(ProviderType providerType, Map<String, String> fields);
 
-        ProviderResult deleteProxy(ProxyEntry proxyEntry, Map<String, String> fields, boolean mockMode);
+        ProviderResult deleteProxy(ProxyEntry proxyEntry, Map<String, String> fields);
 
         void upsertProxy(ProxyEntry proxyEntry);
 
-        void updateProviderFormState(ProviderType providerType, boolean mockMode, Map<String, String> fields);
+        void updateProviderFormState(ProviderType providerType, Map<String, String> fields);
 
         void updateSettings(int port, RotationStrategy rotationStrategy, boolean autoStart, boolean persistSensitive, boolean allowExternalBind, boolean restartProxy);
 
@@ -546,7 +544,6 @@ public final class ProxyForgeTab extends JPanel
         private final ProviderType providerType;
         private final List<FieldSpec> fieldSpecs;
         private final Map<String, JTextField> fields = new LinkedHashMap<>();
-        private final JCheckBox mockModeCheck = new JCheckBox("Mock Mode (local only, no cloud deployment)");
         private ProxyForgeActions actions;
         private Supplier<ProxyEntry> selectedProxySupplier;
 
@@ -581,9 +578,6 @@ public final class ProxyForgeTab extends JPanel
                 row++;
             }
 
-            mockModeCheck.setSelected(true);
-            mockModeCheck.setToolTipText("When enabled, ProxyForge creates a local mock entry and does not call the cloud provider API.");
-
             JPanel buttonBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
             JButton deployButton = new JButton("Deploy");
             JButton listButton = new JButton("List");
@@ -591,8 +585,6 @@ public final class ProxyForgeTab extends JPanel
             buttonBar.add(deployButton);
             buttonBar.add(listButton);
             buttonBar.add(deleteButton);
-            buttonBar.add(Box.createHorizontalStrut(8));
-            buttonBar.add(mockModeCheck);
 
             add(formPanel, BorderLayout.CENTER);
             add(buttonBar, BorderLayout.SOUTH);
@@ -600,7 +592,7 @@ public final class ProxyForgeTab extends JPanel
             deployButton.addActionListener(event ->
             {
                 rememberState();
-                ProviderResult result = actions.deploy(providerType, currentFields(), mockMode());
+                ProviderResult result = actions.deploy(providerType, currentFields());
                 result.proxies().forEach(actions::upsertProxy);
                 if (result.proxy() != null && result.proxies().isEmpty())
                 {
@@ -612,7 +604,7 @@ public final class ProxyForgeTab extends JPanel
             listButton.addActionListener(event ->
             {
                 rememberState();
-                ProviderResult result = actions.list(providerType, currentFields(), mockMode());
+                ProviderResult result = actions.list(providerType, currentFields());
                 if (result.success())
                 {
                     result.proxies().forEach(actions::upsertProxy);
@@ -634,7 +626,7 @@ public final class ProxyForgeTab extends JPanel
                     return;
                 }
                 rememberState();
-                ProviderResult result = actions.deleteProxy(selected, currentFields(), mockMode());
+                ProviderResult result = actions.deleteProxy(selected, currentFields());
                 JOptionPane.showMessageDialog(this, result.message(), "ProxyForge", result.success() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
             });
         }
@@ -655,16 +647,11 @@ public final class ProxyForgeTab extends JPanel
             ProxyForgeModels.ProviderFormState formState = state.providerFormStates.get(providerType);
             if (formState == null)
             {
+                fields.forEach((key, component) -> component.setText(defaultValue(providerType, key)));
                 return;
             }
 
-            mockModeCheck.setSelected(formState.mockMode);
             fields.forEach((key, component) -> component.setText(formState.fields.getOrDefault(key, defaultValue(providerType, key))));
-        }
-
-        private boolean mockMode()
-        {
-            return mockModeCheck.isSelected();
         }
 
         private Map<String, String> currentFields()
@@ -676,7 +663,7 @@ public final class ProxyForgeTab extends JPanel
 
         private void rememberState()
         {
-            actions.updateProviderFormState(providerType, mockMode(), currentFields());
+            actions.updateProviderFormState(providerType, currentFields());
         }
 
         private static String defaultValue(ProviderType providerType, String key)

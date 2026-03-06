@@ -80,11 +80,6 @@ public final class ProxyForgeHttp
             return ValidationResult.failure("No proxy selected");
         }
 
-        if (proxy.mock)
-        {
-            return ValidationResult.success(1L);
-        }
-
         Instant start = Instant.now();
 
         try

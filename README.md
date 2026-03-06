@@ -26,8 +26,8 @@ ProxyForge is a Burp Suite Professional extension for managing and rotating upst
   - Deploy
   - List
   - Delete
-- Mock mode for every provider so the extension can be validated without live cloud credentials
-- Mock mode is local-only and does not create real cloud resources
+- Provider actions create and manage real cloud resources using the supplied credentials
+- Deploy, list, validate, and delete live provider endpoints directly from Burp
 - Automatic cleanup on Burp unload
 - Persistence for settings, proxy pool, and scope rules via Montoya persistence
 
@@ -67,12 +67,11 @@ ProxyForge follows a control-plane/data-plane split:
   - Session Token (optional)
   - Region
   - Target URL
-- Real mode:
+- Deployment:
   - uses AWS SDK v2 API Gateway REST APIs
   - creates a root `ANY /` and greedy `ANY /{proxy+}` HTTP proxy integration
   - deploys to the `proxy` stage
-- Mock mode:
-  - generates a realistic API Gateway-style endpoint and adds it to the pool without touching AWS
+  - adds the deployed API Gateway endpoint to the proxy pool
 
 ### Cloudflare Flareprox
 
@@ -80,12 +79,11 @@ ProxyForge follows a control-plane/data-plane split:
   - API Token
   - Account ID
   - Workers Subdomain (enter only the account subdomain, not the full `workers.dev` URL)
-  - Target URL (include the scheme, for example `https://target.example`)
-- Real mode:
+  - Target URL (include the scheme and enter the real upstream application URL)
+- Deployment:
   - uploads a Worker script through the Cloudflare Workers API
   - returns a `workers.dev` endpoint for the deployed script
-- Mock mode:
-  - creates a realistic local-only `workers.dev` endpoint and adds it to the pool without deploying anything to Cloudflare
+  - adds the deployed endpoint to the proxy pool
 
 ### VPS Forge
 
@@ -95,11 +93,10 @@ ProxyForge follows a control-plane/data-plane split:
   - Region
   - Instance Type
   - Optional AWS-specific infrastructure fields for EC2
-- Real mode:
+- Deployment:
   - DigitalOcean and Linode use provider APIs with cloud-init to bootstrap a `tinyproxy` instance
   - AWS EC2 supports launch/terminate when the required infrastructure fields are provided
-- Mock mode:
-  - creates a realistic SOCKS5-style pool entry without touching the cloud provider
+  - adds the provisioned proxy endpoint to the pool
 
 ## Build
 
@@ -177,11 +174,11 @@ You can either download a prebuilt `ProxyForge.jar` from **GitHub Releases / Act
 ## Quick start
 
 1. Open the **ProxyForge** tab.
-2. Leave **Mock Mode** enabled in one provider panel.
-3. Populate the minimum fields:
-   - AWS: region + target URL
-   - Cloudflare: target URL (+ workers subdomain if using real mode)
-   - VPS: vendor + region + instance type
+2. Enter valid provider credentials in one provider panel.
+3. Populate the required deployment fields:
+   - AWS: access key, secret key, region, target URL
+   - Cloudflare: API token, account ID, workers subdomain, target URL
+   - VPS: vendor, API token, region, instance type
 4. Click **Deploy**.
 5. In **Rotation Engine**, keep the default local port `8081`.
 6. Click **Start / Restart Proxy**.
@@ -197,7 +194,7 @@ You can either download a prebuilt `ProxyForge.jar` from **GitHub Releases / Act
 ### Provider workflow
 
 - **Deploy**
-  - Creates a real or mock provider endpoint and adds it to the proxy pool.
+  - Creates a provider endpoint and adds it to the proxy pool.
 - **List**
   - Fetches matching remote provider objects and merges them into the local pool.
 - **Delete Selected**
@@ -234,7 +231,7 @@ You can:
 Rules support:
 
 - simple host names
-- wildcard-like `*.example.com` matching
+- wildcard host-pattern matching
 - regex mode
 - fixed proxy assignment
 - provider preference assignment
@@ -245,7 +242,7 @@ Rules support:
 
 - direct connectivity checks for HTTP/SOCKS pool entries
 - HTTP reachability checks for forwarder endpoints
-- mock-success results for mock-mode entries
+- live health results based on connectivity checks against deployed endpoints
 
 ## Persistence and secrets
 
@@ -265,9 +262,9 @@ Rules support:
 
 ## Testing
 
-The project includes a smoke test that:
+The project includes an automated smoke test that:
 
-- starts a mock upstream HTTP proxy,
+- starts a local upstream HTTP proxy test fixture,
 - starts the local ProxyForge listener,
 - sends a plain HTTP request through the ProxyForge port,
 - verifies the request is forwarded correctly, and
@@ -285,8 +282,8 @@ The following views are intended for BApp submission screenshots:
 
 1. **Main tab overview**
    - shows the provider tabs on the left, the proxy pool on the right, and the rotation engine at the top right
-2. **AWS panel in mock deployment mode**
-   - shows a target URL, region, and a successful mock Fireprox deployment
+2. **AWS panel with a live Fireprox deployment**
+   - shows a target URL, region, and the resulting deployed Fireprox endpoint
 3. **Proxy pool with multiple providers**
    - shows mixed AWS, Cloudflare, and VPS entries with request counters
 4. **Scope rule editor and validation results**

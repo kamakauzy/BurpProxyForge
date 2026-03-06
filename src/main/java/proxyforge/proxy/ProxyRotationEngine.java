@@ -100,7 +100,7 @@ public final class ProxyRotationEngine
         List<ProxyEntry> candidates = new ArrayList<>();
         for (ProxyEntry proxy : state.proxies)
         {
-            if (proxy.enabled && (proxy.status == ProxyStatus.ACTIVE || proxy.status == ProxyStatus.MOCK))
+            if (proxy.enabled && proxy.status == ProxyStatus.ACTIVE)
             {
                 if (!requiresConnect || proxy.supportsConnect())
                 {

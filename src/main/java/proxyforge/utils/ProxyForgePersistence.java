@@ -31,6 +31,8 @@ public final class ProxyForgePersistence
             return new ExtensionState();
         }
 
+        json = sanitizeLegacyState(json);
+
         try
         {
             ExtensionState state = ProxyForgeJson.read(json, ExtensionState.class);
@@ -107,5 +109,10 @@ public final class ProxyForgePersistence
             || normalized.contains("password")
             || normalized.endsWith("key")
             || normalized.contains("accesskey");
+    }
+
+    private String sanitizeLegacyState(String json)
+    {
+        return json.replace("\"MOCK\"", "\"ACTIVE\"");
     }
 }
