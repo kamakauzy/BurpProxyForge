@@ -1,0 +1,22 @@
+{
+  "description": "Reference API Gateway structure used by ProxyForge for Fireprox-style deployments.",
+  "resources": [
+    {
+      "path": "/",
+      "method": "ANY",
+      "integrationType": "HTTP_PROXY",
+      "integrationUri": "${targetUrl}"
+    },
+    {
+      "path": "/{proxy+}",
+      "method": "ANY",
+      "integrationType": "HTTP_PROXY",
+      "integrationUri": "${targetUrl}/{proxy}",
+      "requestParameters": {
+        "method.request.path.proxy": true,
+        "integration.request.path.proxy": "method.request.path.proxy"
+      }
+    }
+  ],
+  "stage": "proxy"
+}

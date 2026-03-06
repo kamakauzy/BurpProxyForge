@@ -1,0 +1,13 @@
+Uuid: 7fef2c68-c09d-46fb-922d-0d6f488b8449
+ExtensionType: 1
+Name: ProxyForge
+RepoName: BurpProxyForge
+ScreenVersion: 1.0.0
+SerialVersion: 1
+MinPlatformVersion: 2026.1
+ProOnly: true
+Author: OpenAI
+ShortDescription: Advanced upstream proxy manager for Burp Suite with cloud forwarders, VPS proxies, and rotation controls.
+EntryPoint: build/libs/ProxyForge.jar
+BuildCommand: ./gradlew clean fatJar test
+SupportedProducts: Professional

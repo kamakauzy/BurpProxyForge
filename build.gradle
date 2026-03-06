@@ -1,0 +1,79 @@
+plugins {
+    id 'java'
+    id 'jacoco'
+}
+
+group = 'com.proxyforge'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly 'net.portswigger.burp.extensions:montoya-api:2026.2'
+    testCompileOnly 'net.portswigger.burp.extensions:montoya-api:2026.2'
+
+    implementation platform('software.amazon.awssdk:bom:2.34.0')
+    implementation 'software.amazon.awssdk:apigateway'
+    implementation 'software.amazon.awssdk:ec2'
+    implementation 'software.amazon.awssdk:url-connection-client'
+
+    implementation platform('com.fasterxml.jackson:jackson-bom:2.21.1')
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    testImplementation platform('org.junit:junit-bom:6.0.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+tasks.named('jar') {
+    archiveClassifier = 'plain'
+}
+
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    description = 'Builds a single Burp-ready extension JAR.'
+    archiveFileName = 'ProxyForge.jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.collect { dependency ->
+            dependency.isDirectory() ? dependency : zipTree(dependency)
+        }
+    }
+
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+
+    manifest {
+        attributes(
+            'Implementation-Title': 'ProxyForge',
+            'Implementation-Version': project.version,
+            'Burp-Extension-Class': 'burp.ProxyForgeExtension',
+            'Main-Class': 'burp.ProxyForgeExtension'
+        )
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('fatJar')
+}

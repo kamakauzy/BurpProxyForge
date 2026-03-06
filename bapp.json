@@ -1,0 +1,25 @@
+{
+  "name": "ProxyForge",
+  "repoName": "BurpProxyForge",
+  "version": "1.0.0",
+  "serialVersion": 1,
+  "minPlatformVersion": "2026.1",
+  "proOnly": true,
+  "author": "OpenAI",
+  "shortDescription": "Advanced upstream proxy manager for Burp Suite with cloud forwarders, VPS proxies, and rotation controls.",
+  "entryPoint": "build/libs/ProxyForge.jar",
+  "buildCommand": "./gradlew clean fatJar test",
+  "extensionType": "java",
+  "burpExtensionClass": "burp.ProxyForgeExtension",
+  "supportedProducts": [
+    "Professional"
+  ],
+  "tags": [
+    "proxy",
+    "rotation",
+    "aws",
+    "cloudflare",
+    "vps",
+    "burp"
+  ]
+}
