@@ -320,7 +320,7 @@ public final class ProxyForgeModels
     {
         public static ProviderResult success(String message, ProxyEntry proxy)
         {
-            return new ProviderResult(true, message, proxy, List.of(proxy));
+            return new ProviderResult(true, message, proxy, proxy == null ? List.of() : List.of(proxy));
         }
 
         public static ProviderResult successList(String message, List<ProxyEntry> proxies)
