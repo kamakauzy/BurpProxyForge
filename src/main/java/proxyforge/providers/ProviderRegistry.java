@@ -907,43 +907,90 @@ public final class ProviderRegistry
 
     private ProviderResult enableCloudflareWorkersDevSubdomain(String accountId, String apiToken, String scriptName)
     {
-        List<String> errors = new ArrayList<>();
-        String requestBody = "{\"enabled\":true}";
+        String endpoint = "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain";
+        String requestBody = "{\"enabled\":true,\"previews_enabled\":true}";
 
-        for (String endpoint : List.of(
-            "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain",
-            "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/services/" + scriptName + "/environments/production/subdomain"))
+        try
         {
-            try
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .timeout(HTTP_TIMEOUT)
+                .header("Authorization", "Bearer " + apiToken)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+            HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 3, Duration.ofSeconds(1), logger);
+            if (response.statusCode() >= 400)
             {
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(endpoint))
-                    .timeout(HTTP_TIMEOUT)
-                    .header("Authorization", "Bearer " + apiToken)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .build();
-                HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 3, Duration.ofSeconds(1), logger);
-                if (response.statusCode() >= 400)
+                ProviderResult statusResult = cloudflareSubdomainStatus(accountId, apiToken, scriptName);
+                if (statusResult.success())
                 {
-                    errors.add("HTTP " + response.statusCode() + " for " + endpoint);
-                    continue;
+                    return statusResult;
                 }
+                return ProviderResult.failure("Cloudflare workers.dev enable failed: HTTP " + response.statusCode() + " " + summarizeBody(response.body()));
+            }
 
-                JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
-                if (root.path("success").asBoolean(true))
-                {
-                    return ProviderResult.success("Enabled workers.dev route for " + scriptName, null);
-                }
-                errors.add(cloudflareErrors(root));
-            }
-            catch (Exception exception)
+            JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+            if (!root.path("success").asBoolean(true))
             {
-                errors.add(exception.getMessage());
+                ProviderResult statusResult = cloudflareSubdomainStatus(accountId, apiToken, scriptName);
+                if (statusResult.success())
+                {
+                    return statusResult;
+                }
+                return ProviderResult.failure("Cloudflare workers.dev enable failed: " + cloudflareErrors(root));
             }
+
+            return cloudflareSubdomainStatus(accountId, apiToken, scriptName);
         }
+        catch (Exception exception)
+        {
+            ProviderResult statusResult = cloudflareSubdomainStatus(accountId, apiToken, scriptName);
+            if (statusResult.success())
+            {
+                return statusResult;
+            }
+            String message = exception.getMessage() == null ? exception.toString() : exception.getMessage();
+            return ProviderResult.failure("Cloudflare workers.dev enable failed: " + message);
+        }
+    }
 
-        return ProviderResult.failure("Cloudflare deploy failed to enable workers.dev for " + scriptName + ": " + String.join("; ", errors));
+    private ProviderResult cloudflareSubdomainStatus(String accountId, String apiToken, String scriptName)
+    {
+        try
+        {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain"))
+                .timeout(HTTP_TIMEOUT)
+                .header("Authorization", "Bearer " + apiToken)
+                .GET()
+                .build();
+            HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 2, Duration.ofSeconds(1), logger);
+            if (response.statusCode() >= 400)
+            {
+                return ProviderResult.failure("Cloudflare workers.dev status check failed: HTTP " + response.statusCode() + " " + summarizeBody(response.body()));
+            }
+
+            JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+            if (!root.path("success").asBoolean(true))
+            {
+                return ProviderResult.failure("Cloudflare workers.dev status check failed: " + cloudflareErrors(root));
+            }
+
+            JsonNode result = root.path("result");
+            boolean enabled = result.path("enabled").asBoolean(false);
+            boolean previewsEnabled = result.path("previews_enabled").asBoolean(false);
+            if (enabled || previewsEnabled)
+            {
+                return ProviderResult.success("Enabled workers.dev route for " + scriptName, null);
+            }
+            return ProviderResult.failure("Cloudflare workers.dev route for " + scriptName + " is still disabled after deployment.");
+        }
+        catch (Exception exception)
+        {
+            String message = exception.getMessage() == null ? exception.toString() : exception.getMessage();
+            return ProviderResult.failure("Cloudflare workers.dev status check failed: " + message);
+        }
     }
 
     private ProviderResult verifyCloudflareForwarder(String forwarderUrl)
