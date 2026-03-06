@@ -365,10 +365,22 @@ public final class ProviderRegistry
                     return ProviderResult.failure("Cloudflare deploy failed: " + cloudflareErrors(root));
                 }
 
+                String forwarderUrl = workersDevEndpoint(scriptName, workersSubdomain);
+                ProviderResult subdomainResult = enableCloudflareWorkersDevSubdomain(accountId, apiToken, scriptName);
+                if (!subdomainResult.success())
+                {
+                    return subdomainResult;
+                }
+                ProviderResult verificationResult = verifyCloudflareForwarder(forwarderUrl);
+                if (!verificationResult.success())
+                {
+                    return verificationResult;
+                }
+
                 ProxyEntry entry = ProxyEntry.forwarder(
                     ProviderType.CLOUDFLARE_FLAREPROX,
                     "Flareprox " + scriptName,
-                    workersDevEndpoint(scriptName, workersSubdomain),
+                    forwarderUrl,
                     trimTrailingSlash(targetUrl));
                 entry.providerResourceId = scriptName;
                 entry.metadata.put("scriptName", scriptName);
@@ -893,6 +905,89 @@ public final class ProviderRegistry
         return "https://" + scriptName + "." + workersSubdomain + ".workers.dev/";
     }
 
+    private ProviderResult enableCloudflareWorkersDevSubdomain(String accountId, String apiToken, String scriptName)
+    {
+        List<String> errors = new ArrayList<>();
+        String requestBody = "{\"enabled\":true}";
+
+        for (String endpoint : List.of(
+            "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain",
+            "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/services/" + scriptName + "/environments/production/subdomain"))
+        {
+            try
+            {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(endpoint))
+                    .timeout(HTTP_TIMEOUT)
+                    .header("Authorization", "Bearer " + apiToken)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+                HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 3, Duration.ofSeconds(1), logger);
+                if (response.statusCode() >= 400)
+                {
+                    errors.add("HTTP " + response.statusCode() + " for " + endpoint);
+                    continue;
+                }
+
+                JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+                if (root.path("success").asBoolean(true))
+                {
+                    return ProviderResult.success("Enabled workers.dev route for " + scriptName, null);
+                }
+                errors.add(cloudflareErrors(root));
+            }
+            catch (Exception exception)
+            {
+                errors.add(exception.getMessage());
+            }
+        }
+
+        return ProviderResult.failure("Cloudflare deploy failed to enable workers.dev for " + scriptName + ": " + String.join("; ", errors));
+    }
+
+    private ProviderResult verifyCloudflareForwarder(String forwarderUrl)
+    {
+        Instant deadline = Instant.now().plus(Duration.ofSeconds(45));
+        String lastFailure = "Cloudflare forwarder endpoint did not become reachable";
+
+        while (Instant.now().isBefore(deadline))
+        {
+            try
+            {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(forwarderUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "ProxyForge/2")
+                    .GET()
+                    .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 500 && !looksLikeCloudflarePlaceholder(response.body()))
+                {
+                    return ProviderResult.success("Verified Cloudflare forwarder endpoint " + forwarderUrl, null);
+                }
+
+                lastFailure = response.statusCode() + " " + summarizeBody(response.body());
+            }
+            catch (Exception exception)
+            {
+                lastFailure = exception.getMessage();
+            }
+
+            try
+            {
+                Thread.sleep(3_000L);
+            }
+            catch (InterruptedException exception)
+            {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        return ProviderResult.failure("Cloudflare forwarder did not become live at " + forwarderUrl + ": " + lastFailure);
+    }
+
     private static String cloudflareErrors(JsonNode root)
     {
         List<String> errors = new ArrayList<>();
@@ -931,6 +1026,25 @@ public final class ProviderRegistry
             }
         }
         return "";
+    }
+
+    static boolean looksLikeCloudflarePlaceholder(String body)
+    {
+        String normalized = body == null ? "" : body.toLowerCase(Locale.ROOT);
+        return normalized.contains("there is nothing here yet")
+            || normalized.contains("please check back again later")
+            || normalized.contains("page not found")
+            || normalized.contains("error code: 10007");
+    }
+
+    private static String summarizeBody(String body)
+    {
+        if (body == null || body.isBlank())
+        {
+            return "empty response";
+        }
+        String singleLine = body.replaceAll("\\s+", " ").trim();
+        return singleLine.length() > 160 ? singleLine.substring(0, 160) + "..." : singleLine;
     }
 
     private static boolean isBlank(String value)

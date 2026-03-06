@@ -82,8 +82,9 @@ ProxyForge now uses a hybrid routing architecture:
   - Target URL (include the scheme and enter the real upstream application URL)
 - Deployment:
   - uploads a Worker script through the Cloudflare Workers API
-  - returns a `workers.dev` endpoint for the deployed script
-  - adds the deployed endpoint to the proxy pool
+  - enables the public `workers.dev` route for the deployed script
+  - verifies the public endpoint before adding it to the proxy pool
+  - returns the verified `workers.dev` endpoint for the deployed script
 
 ### VPS Forge
 

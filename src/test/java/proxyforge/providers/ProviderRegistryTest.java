@@ -28,4 +28,11 @@ class ProviderRegistryTest
         assertThrows(IllegalArgumentException.class, () -> ProviderRegistry.normalizeWorkersSubdomain("https://workers.dev/foo"));
         assertThrows(IllegalArgumentException.class, () -> ProviderRegistry.normalizeWorkersSubdomain("bad/subdomain"));
     }
+
+    @Test
+    void detectsCloudflarePlaceholderPage()
+    {
+        assertEquals(true, ProviderRegistry.looksLikeCloudflarePlaceholder("There is nothing here yet. Please check back again later."));
+        assertEquals(false, ProviderRegistry.looksLikeCloudflarePlaceholder("<html><title>Home - SecurIT360</title></html>"));
+    }
 }
