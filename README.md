@@ -105,6 +105,19 @@ ProxyForge follows a control-plane/data-plane split:
 - Java 21
 - Network access for Gradle dependency resolution
 
+### Prebuilt downloads
+
+You do not need to build ProxyForge locally if you only want the installable jar.
+
+- **GitHub Releases**
+  - Maintainers can publish a version tag such as `v1.0.1`.
+  - The GitHub Actions release workflow will attach `ProxyForge.jar` to that release automatically.
+  - End users can download the jar directly from the repository's **Releases** page.
+- **GitHub Actions artifacts**
+  - Every push, pull request, and manual workflow run uploads a `ProxyForge.jar` artifact.
+  - Open the relevant run under the repository's **Actions** tab and download the `ProxyForge-<commit-sha>` artifact.
+  - This is useful for testing branch builds before an official release is tagged.
+
 ### Commands
 
 ```bash
@@ -119,7 +132,9 @@ Artifacts:
 
 ## Load in Burp Suite Professional
 
-1. Build the project:
+You can either download a prebuilt `ProxyForge.jar` from **GitHub Releases / Actions artifacts** or build it locally.
+
+1. If you want to build the project yourself:
 
    ```bash
    ./gradlew clean fatJar test
@@ -128,7 +143,7 @@ Artifacts:
 2. Open Burp Suite Professional.
 3. Go to **Extensions**.
 4. Add a new **Java** extension.
-5. Select `build/libs/ProxyForge.jar`.
+5. Select the downloaded `ProxyForge.jar` or the locally built `build/libs/ProxyForge.jar`.
 6. Confirm the extension loads and the **ProxyForge** tab appears.
 
 ## Quick start
@@ -266,6 +281,12 @@ Recommended build command for reviewers:
 ```bash
 ./gradlew clean fatJar test
 ```
+
+Maintainer release flow:
+
+1. Push commits normally to generate downloadable Actions artifacts.
+2. Create and push a version tag such as `v1.0.1`.
+3. GitHub Actions will publish a GitHub Release and attach `ProxyForge.jar`.
 
 ## Project layout
 
