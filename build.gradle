@@ -4,7 +4,8 @@ plugins {
 }
 
 group = 'com.proxyforge'
-version = '1.0.0'
+def baseVersion = '1.0.0'
+version = findProperty('releaseVersion') ?: baseVersion
 
 java {
     toolchain {
