@@ -371,6 +371,7 @@ public final class ProviderRegistry
                     workersDevEndpoint(scriptName, workersSubdomain),
                     trimTrailingSlash(targetUrl));
                 entry.providerResourceId = scriptName;
+                entry.metadata.put("scriptName", scriptName);
                 entry.metadata.put("workersSubdomain", workersSubdomain);
                 entry.metadata.put("targetUrl", targetUrl);
                 return ProviderResult.success("Cloudflare Worker deployed: " + entry.forwarderBaseUrl, entry);
@@ -428,7 +429,7 @@ public final class ProviderRegistry
                 List<ProxyEntry> entries = new ArrayList<>();
                 for (JsonNode node : root.path("result"))
                 {
-                    String id = node.path("id").asText();
+                    String id = cloudflareScriptIdentifier(node);
                     if (!id.startsWith("proxyforge-"))
                     {
                         continue;
@@ -440,6 +441,7 @@ public final class ProviderRegistry
                         workersDevEndpoint(id, workersSubdomain),
                         "");
                     entry.providerResourceId = id;
+                    entry.metadata.put("scriptName", id);
                     entry.metadata.put("workersSubdomain", workersSubdomain);
                     entries.add(entry);
                 }
@@ -464,8 +466,9 @@ public final class ProviderRegistry
             {
                 String accountId = trim(fields.get("accountId"));
                 String apiToken = trim(fields.get("apiToken"));
+                String scriptName = defaultString(proxyEntry.metadata.get("scriptName"), proxyEntry.providerResourceId);
                 HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + proxyEntry.providerResourceId))
+                    .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName))
                     .timeout(HTTP_TIMEOUT)
                     .header("Authorization", "Bearer " + apiToken)
                     .DELETE()
@@ -478,9 +481,13 @@ public final class ProviderRegistry
                 JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
                 if (!root.path("success").asBoolean(true))
                 {
+                    if (cloudflareHasErrorCode(root, 10007))
+                    {
+                        return ProviderResult.success("Cloudflare Worker " + scriptName + " was already absent remotely; removed local entry.", proxyEntry);
+                    }
                     return ProviderResult.failure("Cloudflare delete failed: " + cloudflareErrors(root));
                 }
-                return ProviderResult.success("Deleted Cloudflare Worker " + proxyEntry.providerResourceId, proxyEntry);
+                return ProviderResult.success("Deleted Cloudflare Worker " + scriptName, proxyEntry);
             }
             catch (Exception exception)
             {
@@ -899,6 +906,31 @@ public final class ProviderRegistry
             }
         }
         return errors.isEmpty() ? "Unknown Cloudflare API error" : String.join("; ", errors);
+    }
+
+    private static boolean cloudflareHasErrorCode(JsonNode root, int expectedCode)
+    {
+        for (JsonNode error : root.path("errors"))
+        {
+            if (error.path("code").asInt() == expectedCode)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String cloudflareScriptIdentifier(JsonNode node)
+    {
+        for (String field : List.of("id", "script", "name", "tag"))
+        {
+            String value = node.path(field).asText();
+            if (!value.isBlank())
+            {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static boolean isBlank(String value)
