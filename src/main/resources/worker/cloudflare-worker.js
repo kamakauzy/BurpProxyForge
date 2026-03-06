@@ -11,7 +11,9 @@ export default {
     target.search = inbound.search;
 
     const headers = new Headers(request.headers);
-    headers.set("X-ProxyForge-Original-Host", inbound.host);
+    if (!headers.has("X-ProxyForge-Original-Host")) {
+      headers.set("X-ProxyForge-Original-Host", inbound.host);
+    }
     headers.set("Host", target.host);
 
     return fetch(target.toString(), {

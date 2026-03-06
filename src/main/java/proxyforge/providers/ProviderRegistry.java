@@ -107,7 +107,15 @@ public final class ProviderRegistry
         @Override
         public ProviderResult deploy(DeployRequest request)
         {
-            String targetUrl = trim(request.field("targetUrl"));
+            String targetUrl;
+            try
+            {
+                targetUrl = normalizeTargetUrl(request.field("targetUrl"));
+            }
+            catch (IllegalArgumentException exception)
+            {
+                return ProviderResult.failure(exception.getMessage());
+            }
             String region = trim(request.field("region"));
             if (request.mockMode() || isBlank(targetUrl) || isBlank(request.field("accessKey")) || isBlank(request.field("secretKey")))
             {
@@ -121,7 +129,7 @@ public final class ProviderRegistry
                     true);
                 mockEntry.providerResourceId = fakeId;
                 mockEntry.metadata.put("region", resolvedRegion);
-                return ProviderResult.success("Created mock Fireprox endpoint for " + defaultTarget(targetUrl), mockEntry);
+                return ProviderResult.success("Created a local mock Fireprox endpoint only. No AWS API Gateway was deployed for " + defaultTarget(targetUrl), mockEntry);
             }
 
             try (ApiGatewayClient client = apiGatewayClient(request.fields()))
@@ -292,29 +300,37 @@ public final class ProviderRegistry
         @Override
         public ProviderResult deploy(DeployRequest request)
         {
-            String targetUrl = trim(request.field("targetUrl"));
+            String targetUrl;
+            String workersSubdomain;
+            try
+            {
+                targetUrl = normalizeTargetUrl(request.field("targetUrl"));
+                workersSubdomain = normalizeWorkersSubdomain(request.field("workersSubdomain"));
+            }
+            catch (IllegalArgumentException exception)
+            {
+                return ProviderResult.failure(exception.getMessage());
+            }
             String accountId = trim(request.field("accountId"));
             String apiToken = trim(request.field("apiToken"));
-            String workersSubdomain = trim(request.field("workersSubdomain"));
 
             if (request.mockMode() || isBlank(targetUrl) || isBlank(accountId) || isBlank(apiToken))
             {
                 String fakeName = "proxyforge-" + shortId();
-                String suffix = isBlank(workersSubdomain) ? "workers.dev" : workersSubdomain + ".workers.dev";
                 ProxyEntry entry = ProxyEntry.forwarder(
                     ProviderType.CLOUDFLARE_FLAREPROX,
                     "Flareprox " + fakeName,
-                    "https://" + fakeName + "." + suffix + "/",
+                    workersDevEndpoint(fakeName, defaultString(workersSubdomain, "example")),
                     targetUrl,
                     true);
                 entry.providerResourceId = fakeName;
                 entry.metadata.put("workersSubdomain", workersSubdomain);
-                return ProviderResult.success("Created mock Cloudflare Worker endpoint for " + defaultTarget(targetUrl), entry);
+                return ProviderResult.success("Created a local mock Cloudflare endpoint only. No Cloudflare Worker was deployed for " + defaultTarget(targetUrl), entry);
             }
 
             if (isBlank(workersSubdomain))
             {
-                return ProviderResult.failure("Cloudflare workers subdomain is required for real deployments.");
+                return ProviderResult.failure("Cloudflare workers subdomain is required. Enter only the account subdomain, not the full workers.dev URL.");
             }
 
             String scriptName = "proxyforge-" + shortId();
@@ -344,15 +360,21 @@ public final class ProviderRegistry
                 {
                     return ProviderResult.failure("Cloudflare deploy failed: HTTP " + response.statusCode() + " " + response.body());
                 }
+                JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+                if (!root.path("success").asBoolean(true))
+                {
+                    return ProviderResult.failure("Cloudflare deploy failed: " + cloudflareErrors(root));
+                }
 
                 ProxyEntry entry = ProxyEntry.forwarder(
                     ProviderType.CLOUDFLARE_FLAREPROX,
                     "Flareprox " + scriptName,
-                    "https://" + scriptName + "." + workersSubdomain + ".workers.dev/",
+                    workersDevEndpoint(scriptName, workersSubdomain),
                     trimTrailingSlash(targetUrl),
                     false);
                 entry.providerResourceId = scriptName;
                 entry.metadata.put("workersSubdomain", workersSubdomain);
+                entry.metadata.put("targetUrl", targetUrl);
                 return ProviderResult.success("Cloudflare Worker deployed: " + entry.forwarderBaseUrl, entry);
             }
             catch (Exception exception)
@@ -367,10 +389,22 @@ public final class ProviderRegistry
         {
             String accountId = trim(fields.get("accountId"));
             String apiToken = trim(fields.get("apiToken"));
-            String workersSubdomain = trim(fields.get("workersSubdomain"));
+            String workersSubdomain;
+            try
+            {
+                workersSubdomain = normalizeWorkersSubdomain(fields.get("workersSubdomain"));
+            }
+            catch (IllegalArgumentException exception)
+            {
+                return ProviderResult.failure(exception.getMessage());
+            }
             if (isBlank(accountId) || isBlank(apiToken))
             {
                 return ProviderResult.successList("No Cloudflare credentials supplied; returning local/mock view only.", List.of());
+            }
+            if (isBlank(workersSubdomain))
+            {
+                return ProviderResult.failure("Workers subdomain is required to build usable Cloudflare endpoints. Enter only the account subdomain, not the full workers.dev URL.");
             }
 
             try
@@ -389,6 +423,10 @@ public final class ProviderRegistry
                 }
 
                 JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+                if (!root.path("success").asBoolean(true))
+                {
+                    return ProviderResult.failure("Cloudflare list failed: " + cloudflareErrors(root));
+                }
                 List<ProxyEntry> entries = new ArrayList<>();
                 for (JsonNode node : root.path("result"))
                 {
@@ -401,7 +439,7 @@ public final class ProviderRegistry
                     ProxyEntry entry = ProxyEntry.forwarder(
                         ProviderType.CLOUDFLARE_FLAREPROX,
                         "Flareprox " + id,
-                        isBlank(workersSubdomain) ? "" : "https://" + id + "." + workersSubdomain + ".workers.dev/",
+                        workersDevEndpoint(id, workersSubdomain),
                         "",
                         false);
                     entry.providerResourceId = id;
@@ -439,6 +477,11 @@ public final class ProviderRegistry
                 if (response.statusCode() >= 300)
                 {
                     return ProviderResult.failure("Cloudflare delete failed: HTTP " + response.statusCode() + " " + response.body());
+                }
+                JsonNode root = ProxyForgeJson.mapper().readTree(response.body());
+                if (!root.path("success").asBoolean(true))
+                {
+                    return ProviderResult.failure("Cloudflare delete failed: " + cloudflareErrors(root));
                 }
                 return ProviderResult.success("Deleted Cloudflare Worker " + proxyEntry.providerResourceId, proxyEntry);
             }
@@ -806,6 +849,76 @@ public final class ProviderRegistry
     private static String trim(String value)
     {
         return value == null ? "" : value.trim();
+    }
+
+    static String normalizeTargetUrl(String value)
+    {
+        String normalized = trim(value);
+        if (normalized.isEmpty())
+        {
+            return "";
+        }
+        if (!normalized.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*$"))
+        {
+            normalized = "https://" + normalized;
+        }
+
+        URI uri = URI.create(normalized);
+        if (isBlank(uri.getHost()))
+        {
+            throw new IllegalArgumentException("Target URL must include a valid host name.");
+        }
+        return trimTrailingSlash(uri.toString());
+    }
+
+    static String normalizeWorkersSubdomain(String value)
+    {
+        String normalized = trim(value).toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty())
+        {
+            return "";
+        }
+
+        if (normalized.startsWith("http://") || normalized.startsWith("https://"))
+        {
+            normalized = Objects.requireNonNullElse(URI.create(normalized).getHost(), "");
+        }
+
+        normalized = normalized.replaceAll("\\.+$", "");
+        if (normalized.endsWith(".workers.dev"))
+        {
+            normalized = normalized.substring(0, normalized.length() - ".workers.dev".length());
+        }
+
+        if (normalized.equals("workers")
+            || normalized.equals("workers.dev")
+            || normalized.isBlank()
+            || normalized.contains("/")
+            || !normalized.matches("[a-z0-9-]+(\\.[a-z0-9-]+)*"))
+        {
+            throw new IllegalArgumentException("Workers subdomain must contain only the account subdomain, for example abc123.");
+        }
+        return normalized;
+    }
+
+    private static String workersDevEndpoint(String scriptName, String workersSubdomain)
+    {
+        return "https://" + scriptName + "." + workersSubdomain + ".workers.dev/";
+    }
+
+    private static String cloudflareErrors(JsonNode root)
+    {
+        List<String> errors = new ArrayList<>();
+        for (JsonNode error : root.path("errors"))
+        {
+            String code = error.path("code").asText();
+            String message = error.path("message").asText();
+            if (!code.isBlank() || !message.isBlank())
+            {
+                errors.add((code.isBlank() ? "" : code + ": ") + message);
+            }
+        }
+        return errors.isEmpty() ? "Unknown Cloudflare API error" : String.join("; ", errors);
     }
 
     private static boolean isBlank(String value)

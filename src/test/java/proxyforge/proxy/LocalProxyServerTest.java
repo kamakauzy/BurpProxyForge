@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalProxyServerTest
@@ -107,6 +108,48 @@ class LocalProxyServerTest
         assertNotNull(first);
         assertNotNull(second);
         assertTrue(!first.id.equals(second.id));
+    }
+
+    @Test
+    void connectSelectionSkipsForwarders()
+    {
+        ExtensionState state = new ExtensionState();
+        state.settings.rotationStrategy = RotationStrategy.ROUND_ROBIN;
+        state.proxies.add(ProxyEntry.forwarder(
+            ProviderType.CLOUDFLARE_FLAREPROX,
+            "flareprox",
+            "https://flare.example.workers.dev/",
+            "https://example.com",
+            true));
+        ProxyEntry connectCapable = ProxyEntry.networkProxy(
+            ProviderType.VPS_FORGE,
+            ProxyMode.HTTP_PROXY,
+            "http-proxy",
+            "127.0.0.1",
+            9001,
+            "",
+            "",
+            true);
+        state.proxies.add(connectCapable);
+
+        ProxyRotationEngine engine = new ProxyRotationEngine(state);
+        assertEquals(connectCapable.id, engine.chooseProxy("example.com", true).proxy().id);
+    }
+
+    @Test
+    void connectSelectionReturnsNoProxyWhenOnlyForwardersExist()
+    {
+        ExtensionState state = new ExtensionState();
+        state.settings.rotationStrategy = RotationStrategy.ROUND_ROBIN;
+        state.proxies.add(ProxyEntry.forwarder(
+            ProviderType.CLOUDFLARE_FLAREPROX,
+            "flareprox",
+            "https://flare.example.workers.dev/",
+            "https://example.com",
+            true));
+
+        ProxyRotationEngine engine = new ProxyRotationEngine(state);
+        assertNull(engine.chooseProxy("example.com", true).proxy());
     }
 
     private static String readAll(InputStream inputStream) throws IOException

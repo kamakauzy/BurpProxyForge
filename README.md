@@ -27,6 +27,7 @@ ProxyForge is a Burp Suite Professional extension for managing and rotating upst
   - List
   - Delete
 - Mock mode for every provider so the extension can be validated without live cloud credentials
+- Mock mode is local-only and does not create real cloud resources
 - Automatic cleanup on Burp unload
 - Persistence for settings, proxy pool, and scope rules via Montoya persistence
 
@@ -78,13 +79,13 @@ ProxyForge follows a control-plane/data-plane split:
 - Inputs:
   - API Token
   - Account ID
-  - Workers Subdomain
-  - Target URL
+  - Workers Subdomain (enter only the account subdomain, not the full `workers.dev` URL)
+  - Target URL (include the scheme, for example `https://target.example`)
 - Real mode:
   - uploads a Worker script through the Cloudflare Workers API
   - returns a `workers.dev` endpoint for the deployed script
 - Mock mode:
-  - creates a realistic `workers.dev` endpoint and adds it to the pool
+  - creates a realistic local-only `workers.dev` endpoint and adds it to the pool without deploying anything to Cloudflare
 
 ### VPS Forge
 
@@ -260,6 +261,7 @@ Rules support:
 - Standard HTTP upstream proxies support plain HTTP forwarding plus `CONNECT` tunneling.
 - SOCKS5 entries support outbound plain HTTP forwarding and `CONNECT` tunneling.
 - Target-specific forwarders are used for rewritten plain HTTP requests.
+- Fireprox and Flareprox entries are forwarders, not generic upstream CONNECT proxies, so they are intended for rewritten plain HTTP traffic rather than raw HTTPS tunneling.
 
 ## Testing
 

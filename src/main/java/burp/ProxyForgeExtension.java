@@ -148,13 +148,56 @@ public class ProxyForgeExtension implements BurpExtension
 
         if (existingIndex >= 0)
         {
-            state.proxies.set(existingIndex, candidate);
+            ProxyEntry existing = state.proxies.get(existingIndex);
+            state.proxies.set(existingIndex, mergeExistingProxy(existing, candidate));
         }
         else
         {
             state.proxies.add(candidate);
         }
         persistAndRefresh();
+    }
+
+    private ProxyEntry mergeExistingProxy(ProxyEntry existing, ProxyEntry candidate)
+    {
+        candidate.id = existing.id;
+        candidate.enabled = existing.enabled;
+        candidate.createdAt = existing.createdAt;
+        candidate.lastValidatedAt = candidate.lastValidatedAt != null ? candidate.lastValidatedAt : existing.lastValidatedAt;
+        candidate.lastUsedAt = candidate.lastUsedAt != null ? candidate.lastUsedAt : existing.lastUsedAt;
+        candidate.requestsServed += existing.requestsServed;
+        candidate.successfulRequests += existing.successfulRequests;
+        candidate.failedRequests += existing.failedRequests;
+        if (candidate.lastError == null || candidate.lastError.isBlank())
+        {
+            candidate.lastError = existing.lastError;
+        }
+        if (candidate.forwarderBaseUrl == null || candidate.forwarderBaseUrl.isBlank())
+        {
+            candidate.forwarderBaseUrl = existing.forwarderBaseUrl;
+        }
+        if (candidate.targetBaseUrl == null || candidate.targetBaseUrl.isBlank())
+        {
+            candidate.targetBaseUrl = existing.targetBaseUrl;
+        }
+        if (candidate.endpointHost == null || candidate.endpointHost.isBlank())
+        {
+            candidate.endpointHost = existing.endpointHost;
+        }
+        if (candidate.endpointPort <= 0)
+        {
+            candidate.endpointPort = existing.endpointPort;
+        }
+        if (candidate.username == null || candidate.username.isBlank())
+        {
+            candidate.username = existing.username;
+        }
+        if (candidate.password == null || candidate.password.isBlank())
+        {
+            candidate.password = existing.password;
+        }
+        existing.metadata.forEach(candidate.metadata::putIfAbsent);
+        return candidate;
     }
 
     private synchronized void removeProxy(String proxyId)

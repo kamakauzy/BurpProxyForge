@@ -32,7 +32,12 @@ public final class ProxyRotationEngine
 
     public synchronized RouteDecision chooseProxy(String host)
     {
-        List<ProxyEntry> candidates = activeProxies();
+        return chooseProxy(host, false);
+    }
+
+    public synchronized RouteDecision chooseProxy(String host, boolean requiresConnect)
+    {
+        List<ProxyEntry> candidates = activeProxies(requiresConnect);
         if (candidates.isEmpty())
         {
             return new RouteDecision(null, null);
@@ -87,12 +92,20 @@ public final class ProxyRotationEngine
 
     public synchronized List<ProxyEntry> activeProxies()
     {
+        return activeProxies(false);
+    }
+
+    public synchronized List<ProxyEntry> activeProxies(boolean requiresConnect)
+    {
         List<ProxyEntry> candidates = new ArrayList<>();
         for (ProxyEntry proxy : state.proxies)
         {
             if (proxy.enabled && (proxy.status == ProxyStatus.ACTIVE || proxy.status == ProxyStatus.MOCK))
             {
-                candidates.add(proxy);
+                if (!requiresConnect || proxy.supportsConnect())
+                {
+                    candidates.add(proxy);
+                }
             }
         }
         return candidates;

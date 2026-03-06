@@ -138,15 +138,23 @@ public final class LocalProxyServer implements AutoCloseable
             }
 
             ParsedRequest parsedRequest = ParsedRequest.parse(requestHeader);
-            RouteDecision routeDecision = rotationEngine.chooseProxy(parsedRequest.host());
+            boolean connectRequest = "CONNECT".equalsIgnoreCase(parsedRequest.method());
+            RouteDecision routeDecision = rotationEngine.chooseProxy(parsedRequest.host(), connectRequest);
             ProxyEntry proxyEntry = routeDecision.proxy();
             if (proxyEntry == null)
             {
-                sendSimpleResponse(clientOutput, 502, "No active proxies in pool");
+                if (connectRequest)
+                {
+                    sendSimpleResponse(clientOutput, 502, "No CONNECT-capable proxies in pool. Fireprox/Flareprox forwarders only support plain HTTP requests.");
+                }
+                else
+                {
+                    sendSimpleResponse(clientOutput, 502, "No active proxies in pool");
+                }
                 return;
             }
 
-            if ("CONNECT".equalsIgnoreCase(parsedRequest.method()))
+            if (connectRequest)
             {
                 handleConnect(clientInput, clientOutput, parsedRequest, proxyEntry);
             }

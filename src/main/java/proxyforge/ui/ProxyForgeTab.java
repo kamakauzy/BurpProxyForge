@@ -54,6 +54,8 @@ public final class ProxyForgeTab extends JPanel
     private final ScopeRuleTableModel scopeRuleTableModel = new ScopeRuleTableModel();
     private final JTable proxyTable = new JTable(proxyTableModel);
     private final JTable scopeRuleTable = new JTable(scopeRuleTableModel);
+    private final JScrollPane proxyTableScrollPane = new JScrollPane(proxyTable);
+    private final JScrollPane scopeRuleScrollPane = new JScrollPane(scopeRuleTable);
     private final JTextArea logArea = new JTextArea();
     private final JLabel statsLabel = new JLabel("No proxies loaded.");
     private final JComboBox<RotationStrategy> strategyCombo = new JComboBox<>();
@@ -122,6 +124,8 @@ public final class ProxyForgeTab extends JPanel
 
         proxyTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         scopeRuleTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        proxyTableScrollPane.setPreferredSize(new Dimension(520, 220));
+        scopeRuleScrollPane.setPreferredSize(new Dimension(520, 170));
 
         strategyCombo.setModel(new DefaultComboBoxModel<>(RotationStrategy.values()));
         restartProxyButton.addActionListener(event -> applySettings(true));
@@ -154,8 +158,17 @@ public final class ProxyForgeTab extends JPanel
     public void refresh()
     {
         ExtensionState state = actions.currentState();
+        String selectedProxyId = selectedProxy() == null ? null : selectedProxy().id;
         proxyTableModel.setRows(state.proxies);
         scopeRuleTableModel.setRows(state.scopeRules);
+        if (selectedProxyId != null)
+        {
+            int row = proxyTableModel.indexOfProxyId(selectedProxyId);
+            if (row >= 0)
+            {
+                proxyTable.getSelectionModel().setSelectionInterval(row, row);
+            }
+        }
 
         strategyCombo.setSelectedItem(state.settings.rotationStrategy);
         portField.setText(String.valueOf(state.settings.localProxyPort));
@@ -229,9 +242,12 @@ public final class ProxyForgeTab extends JPanel
     private Component buildOperationsArea()
     {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
-        panel.add(buildProxyPoolPanel(), BorderLayout.CENTER);
         panel.add(buildRotationPanel(), BorderLayout.NORTH);
-        panel.add(buildScopeRulesPanel(), BorderLayout.SOUTH);
+        JSplitPane verticalSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        verticalSplit.setResizeWeight(0.62);
+        verticalSplit.setTopComponent(buildProxyPoolPanel());
+        verticalSplit.setBottomComponent(buildScopeRulesPanel());
+        panel.add(verticalSplit, BorderLayout.CENTER);
         return panel;
     }
 
@@ -284,7 +300,7 @@ public final class ProxyForgeTab extends JPanel
         refreshButton.addActionListener(event -> refresh());
 
         panel.add(topBar, BorderLayout.NORTH);
-        panel.add(new JScrollPane(proxyTable), BorderLayout.CENTER);
+        panel.add(proxyTableScrollPane, BorderLayout.CENTER);
         return panel;
     }
 
@@ -341,7 +357,7 @@ public final class ProxyForgeTab extends JPanel
         topBar.add(addRule);
         topBar.add(deleteRule);
         panel.add(topBar, BorderLayout.NORTH);
-        panel.add(new JScrollPane(scopeRuleTable), BorderLayout.CENTER);
+        panel.add(scopeRuleScrollPane, BorderLayout.CENTER);
 
         addRule.addActionListener(event -> addScopeRule());
         deleteRule.addActionListener(event ->
@@ -457,6 +473,8 @@ public final class ProxyForgeTab extends JPanel
             Validation
             - Validate All opens a direct health check for each pool entry.
             - Mock mode providers return healthy stub entries without touching cloud APIs.
+            - Fireprox / Flareprox entries are HTTP forwarders. They do not support HTTPS CONNECT tunneling like a regular upstream proxy.
+            - Enter target URLs with a scheme, for example https://example.com.
             """);
         textArea.setEditable(false);
         textArea.setLineWrap(true);
@@ -528,7 +546,7 @@ public final class ProxyForgeTab extends JPanel
         private final ProviderType providerType;
         private final List<FieldSpec> fieldSpecs;
         private final Map<String, JTextField> fields = new LinkedHashMap<>();
-        private final JCheckBox mockModeCheck = new JCheckBox("Mock Mode");
+        private final JCheckBox mockModeCheck = new JCheckBox("Mock Mode (local only, no cloud deployment)");
         private ProxyForgeActions actions;
         private Supplier<ProxyEntry> selectedProxySupplier;
 
@@ -564,6 +582,7 @@ public final class ProxyForgeTab extends JPanel
             }
 
             mockModeCheck.setSelected(true);
+            mockModeCheck.setToolTipText("When enabled, ProxyForge creates a local mock entry and does not call the cloud provider API.");
 
             JPanel buttonBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
             JButton deployButton = new JButton("Deploy");
@@ -583,7 +602,7 @@ public final class ProxyForgeTab extends JPanel
                 rememberState();
                 ProviderResult result = actions.deploy(providerType, currentFields(), mockMode());
                 result.proxies().forEach(actions::upsertProxy);
-                if (result.proxy() != null)
+                if (result.proxy() != null && result.proxies().isEmpty())
                 {
                     actions.upsertProxy(result.proxy());
                 }
@@ -730,6 +749,18 @@ public final class ProxyForgeTab extends JPanel
         public ProxyEntry row(int rowIndex)
         {
             return rows.get(rowIndex);
+        }
+
+        public int indexOfProxyId(String proxyId)
+        {
+            for (int index = 0; index < rows.size(); index++)
+            {
+                if (rows.get(index).id.equals(proxyId))
+                {
+                    return index;
+                }
+            }
+            return -1;
         }
     }
 
