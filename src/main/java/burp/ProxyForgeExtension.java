@@ -13,6 +13,7 @@ import proxyforge.models.ProxyForgeModels.ProxyEntry;
 import proxyforge.models.ProxyForgeModels.RotationStrategy;
 import proxyforge.models.ProxyForgeModels.ScopeRule;
 import proxyforge.providers.ProviderRegistry;
+import proxyforge.proxy.ForwarderRewriteHttpHandler;
 import proxyforge.proxy.LocalProxyServer;
 import proxyforge.proxy.ProxyRotationEngine;
 import proxyforge.ui.ProxyForgeTab;
@@ -61,6 +62,7 @@ public class ProxyForgeExtension implements BurpExtension
         this.tab = new ProxyForgeTab(new Actions(), logger);
         api.userInterface().applyThemeToComponent(tab);
         registrations.add(api.userInterface().registerSuiteTab("ProxyForge", tab));
+        registrations.add(api.http().registerHttpHandler(new ForwarderRewriteHttpHandler(rotationEngine, logger, this::persistAndRefresh)));
 
         if (state.settings.autoStartProxy)
         {

@@ -139,6 +139,19 @@ public final class LocalProxyServer implements AutoCloseable
 
             ParsedRequest parsedRequest = ParsedRequest.parse(requestHeader);
             boolean connectRequest = "CONNECT".equalsIgnoreCase(parsedRequest.method());
+            if (rotationEngine.isKnownForwarderHost(parsedRequest.host()))
+            {
+                if (connectRequest)
+                {
+                    handleDirectConnect(clientInput, clientOutput, parsedRequest);
+                }
+                else
+                {
+                    handleDirectHttp(clientInput, clientOutput, parsedRequest);
+                }
+                return;
+            }
+
             RouteDecision routeDecision = rotationEngine.chooseProxy(parsedRequest.host(), connectRequest);
             ProxyEntry proxyEntry = routeDecision.proxy();
             if (proxyEntry == null)
@@ -170,6 +183,38 @@ public final class LocalProxyServer implements AutoCloseable
         finally
         {
             stateChangeCallback.run();
+        }
+    }
+
+    private void handleDirectConnect(InputStream clientInput, OutputStream clientOutput, ParsedRequest request) throws IOException
+    {
+        try (Socket upstreamSocket = new Socket())
+        {
+            upstreamSocket.connect(new InetSocketAddress(request.host(), request.port()), (int) SOCKET_TIMEOUT.toMillis());
+            upstreamSocket.setSoTimeout((int) SOCKET_TIMEOUT.toMillis());
+            clientOutput.write("HTTP/1.1 200 Connection Established\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+            clientOutput.flush();
+            relayBidirectional(clientInput, clientOutput, upstreamSocket.getInputStream(), upstreamSocket.getOutputStream());
+        }
+    }
+
+    private void handleDirectHttp(InputStream clientInput, OutputStream clientOutput, ParsedRequest request) throws IOException
+    {
+        boolean secure = request.isSecureRequest();
+        int port = request.port() > 0 ? request.port() : (secure ? 443 : 80);
+        try (Socket upstreamSocket = secure ? sslSocket(request.host(), port) : new Socket())
+        {
+            if (!secure)
+            {
+                upstreamSocket.connect(new InetSocketAddress(request.host(), port), (int) SOCKET_TIMEOUT.toMillis());
+            }
+            upstreamSocket.setSoTimeout((int) SOCKET_TIMEOUT.toMillis());
+            OutputStream upstreamOutput = upstreamSocket.getOutputStream();
+            byte[] outboundHeader = request.rebuildHeader(request.originFormTarget(), request.host(), false, null, request.host());
+            upstreamOutput.write(outboundHeader);
+            relayRequestBody(clientInput, upstreamOutput, request);
+            upstreamOutput.flush();
+            relayResponse(upstreamSocket.getInputStream(), clientOutput);
         }
     }
 
@@ -698,6 +743,15 @@ public final class LocalProxyServer implements AutoCloseable
 
             String scheme = port == 443 ? "https" : "http";
             return scheme + "://" + host + ((port == 80 || port == 443) ? "" : ":" + port) + requestTarget;
+        }
+
+        public boolean isSecureRequest()
+        {
+            if ("CONNECT".equalsIgnoreCase(method))
+            {
+                return true;
+            }
+            return absoluteRequestTarget().startsWith("https://");
         }
 
         public byte[] rebuildHeader(String outboundTarget, String outboundHost, boolean includeProxyConnection, String proxyAuthorization, String originalHost)

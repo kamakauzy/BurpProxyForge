@@ -33,19 +33,19 @@ ProxyForge is a Burp Suite Professional extension for managing and rotating upst
 
 ## Architecture
 
-ProxyForge follows a control-plane/data-plane split:
+ProxyForge now uses a hybrid routing architecture:
 
-1. Burp sends outbound traffic to a local proxy rule:
+1. Burp sends outbound traffic to the local ProxyForge listener with one upstream proxy rule:
    - Destination host: `*.*`
    - Upstream proxy host: `127.0.0.1`
    - Upstream proxy port: `8081` by default
-2. The local ProxyForge listener receives Burp traffic.
-3. The rotation engine chooses an active proxy from the pool.
-4. ProxyForge either:
-   - forwards the traffic to a standard HTTP upstream proxy,
-   - forwards the traffic to a SOCKS5 proxy, or
-   - rewrites plain HTTP requests to a target-specific forwarder such as Fireprox or Flareprox.
-5. Provider state, logs, request counts, validation state, and scope mappings are surfaced in the Burp tab.
+2. For VPS / HTTP / SOCKS proxy entries:
+   - the local listener chooses a CONNECT-capable upstream proxy from the pool
+   - Burp traffic is forwarded through that upstream proxy normally
+3. For Fireprox / Flareprox forwarder entries:
+   - ProxyForge rewrites matching requests inside Burp to the provider endpoint before they hit the local listener
+   - the local listener detects those rewritten forwarder hosts and connects to them directly instead of re-rotating them
+4. Provider state, logs, request counts, validation state, and scope mappings are surfaced in the Burp tab.
 
 ### Components
 
@@ -186,8 +186,11 @@ You can either download a prebuilt `ProxyForge.jar` from **GitHub Releases / Act
    - Destination host: `*.*`
    - Proxy host: `127.0.0.1`
    - Proxy port: `8081`
-8. Click **Validate All**.
-9. Use **Rotate Now** to force the next candidate.
+8. Use scope rules or target-host matching to decide whether a request should use:
+   - a forwarder entry (Fireprox / Flareprox), or
+   - a CONNECT-capable upstream proxy (VPS / HTTP / SOCKS)
+9. Click **Validate All**.
+10. Use **Rotate Now** to force the next candidate for the upstream proxy lane.
 
 ## Usage guide
 
@@ -220,10 +223,10 @@ You can:
 
 ### Rotation Engine
 
-- **Random** - choose a healthy proxy at random
+- **Random** - choose a healthy upstream proxy or forwarder candidate at random
 - **Round-Robin** - rotate sequentially
 - **Least-Used** - choose the lowest `requestsServed`
-- **Sticky-per-host** - keep the same proxy for repeat hosts
+- **Sticky-per-host** - keep the same route for repeat hosts
 - **Per-scope rule** - honor scope table mappings before fallback
 
 ### Scope-based routing
@@ -235,6 +238,12 @@ Rules support:
 - regex mode
 - fixed proxy assignment
 - provider preference assignment
+
+Hybrid routing behavior:
+
+- If a rule resolves to an AWS Fireprox or Cloudflare Flareprox entry, ProxyForge rewrites the request inside Burp to that forwarder endpoint.
+- If a rule resolves to a VPS / HTTP / SOCKS entry, the local proxy forwards traffic through that upstream proxy.
+- If no forwarder rule matches, ProxyForge falls back to the upstream proxy lane.
 
 ### Validation
 
@@ -257,8 +266,8 @@ Rules support:
 - Optional external binding is available for advanced lab setups.
 - Standard HTTP upstream proxies support plain HTTP forwarding plus `CONNECT` tunneling.
 - SOCKS5 entries support outbound plain HTTP forwarding and `CONNECT` tunneling.
-- Target-specific forwarders are used for rewritten plain HTTP requests.
-- Fireprox and Flareprox entries are forwarders, not generic upstream CONNECT proxies, so they are intended for rewritten plain HTTP traffic rather than raw HTTPS tunneling.
+- Fireprox and Flareprox entries are treated as forwarders, not generic upstream CONNECT proxies.
+- Matching requests are rewritten inside Burp to the provider endpoint, and the local listener bypasses re-rotation for those rewritten forwarder hosts.
 
 ## Testing
 

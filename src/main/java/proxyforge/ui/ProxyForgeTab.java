@@ -34,8 +34,6 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,8 +43,6 @@ import java.util.function.Supplier;
 
 public final class ProxyForgeTab extends JPanel
 {
-    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
-
     private final ProxyForgeActions actions;
     private final ProxyForgeLogger logger;
     private final ProxyTableModel proxyTableModel = new ProxyTableModel();
@@ -180,12 +176,16 @@ public final class ProxyForgeTab extends JPanel
         vpsPanel.load(state);
 
         long activeCount = state.proxies.stream().filter(proxy -> proxy.enabled).count();
+        long forwarderCount = state.proxies.stream().filter(ProxyEntry::isForwarder).count();
+        long upstreamCount = state.proxies.stream().filter(ProxyEntry::supportsConnect).count();
         long totalRequests = state.proxies.stream().mapToLong(proxy -> proxy.requestsServed).sum();
         String selected = selectedProxy() == null ? "none" : selectedProxy().name;
         statsLabel.setText(
             "Proxy server: " + (actions.isProxyRunning() ? "running" : "stopped")
                 + " | Pool: " + state.proxies.size()
                 + " total / " + activeCount + " enabled"
+                + " | Forwarders: " + forwarderCount
+                + " | Upstream proxies: " + upstreamCount
                 + " | Requests served: " + totalRequests
                 + " | Selected: " + selected);
     }
@@ -199,14 +199,14 @@ public final class ProxyForgeTab extends JPanel
             ProxyForge quick start
 
             1. Configure one provider panel with valid cloud credentials and required deployment settings.
-            2. Click Deploy to create one or more provider-managed proxies and add them to the pool.
+            2. Click Deploy to create one or more provider-managed routes and add them to the pool.
             3. Set Burp upstream proxy rules to forward in-scope traffic to 127.0.0.1:8081 (or your configured local port).
             4. Choose a rotation strategy, then click Start / Restart Proxy.
             5. Use Validate All to health-check the pool and Rotate Now to force a different selection.
 
             Notes:
-            - Fireprox / Flareprox forwarders transparently rewrite plain HTTP requests through the provider endpoint.
-            - CONNECT tunnels are supported for standard HTTP and SOCKS5 proxy entries.
+            - Fireprox / Flareprox forwarders are selected inside Burp and rewritten automatically for matching hosts.
+            - CONNECT tunnels are handled only by standard HTTP and SOCKS5 proxy entries.
             - Sensitive provider fields stay in memory by default unless you enable persistence in Settings.
             """);
         textArea.setWrapStyleWord(true);
@@ -469,9 +469,13 @@ public final class ProxyForgeTab extends JPanel
             - Proxy host: 127.0.0.1
             - Proxy port: your configured local port (default 8081)
 
+            Hybrid routing
+            - Fireprox / Flareprox entries are forwarders. ProxyForge rewrites matching requests to those endpoints inside Burp.
+            - Standard HTTP / SOCKS5 entries are used by the local proxy for CONNECT and generic upstream traffic.
+            - Scope rules still apply first. If a rule points to a forwarder, ProxyForge rewrites the request before it reaches the local proxy lane.
+
             Validation
             - Validate All opens a direct health check for each pool entry using the real deployed endpoint.
-            - Fireprox / Flareprox entries are HTTP forwarders. They do not support HTTPS CONNECT tunneling like a regular upstream proxy.
             - Enter target URLs with an explicit scheme such as https:// or http://.
             """);
         textArea.setEditable(false);
@@ -689,7 +693,7 @@ public final class ProxyForgeTab extends JPanel
 
     private static final class ProxyTableModel extends AbstractTableModel
     {
-        private final String[] columns = {"Status", "Provider", "Type", "Endpoint", "Created", "Requests", "Last Error"};
+        private final String[] columns = {"Status", "Provider", "Route", "CONNECT", "Target", "Endpoint", "Requests", "Last Error"};
         private List<ProxyEntry> rows = List.of();
 
         @Override
@@ -718,11 +722,12 @@ public final class ProxyForgeTab extends JPanel
             {
                 case 0 -> row.status;
                 case 1 -> row.providerType.label();
-                case 2 -> row.proxyMode.label();
-                case 3 -> row.displayEndpoint();
-                case 4 -> DATE_TIME.format(row.createdAt);
-                case 5 -> row.requestsServed;
-                case 6 -> row.lastError;
+                case 2 -> row.isForwarder() ? "Forwarder rewrite" : row.proxyMode.label();
+                case 3 -> row.supportsConnect() ? "Yes" : "No";
+                case 4 -> row.isForwarder() ? row.targetBaseUrl : "";
+                case 5 -> row.displayEndpoint();
+                case 6 -> row.requestsServed;
+                case 7 -> row.lastError;
                 default -> "";
             };
         }

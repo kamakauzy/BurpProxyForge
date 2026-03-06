@@ -37,7 +37,7 @@ public final class ProxyRotationEngine
 
     public synchronized RouteDecision chooseProxy(String host, boolean requiresConnect)
     {
-        List<ProxyEntry> candidates = activeProxies(requiresConnect);
+        List<ProxyEntry> candidates = activeUpstreamProxies(requiresConnect);
         if (candidates.isEmpty())
         {
             return new RouteDecision(null, null);
@@ -67,7 +67,7 @@ public final class ProxyRotationEngine
             case STICKY_PER_HOST -> stickyProxy(host, candidates);
             case PER_SCOPE_RULE -> matchedScope == null
                 ? candidates.get(Math.floorMod(roundRobinIndex.getAndIncrement(), candidates.size()))
-                : resolveScopeProxy(matchedScope, candidates);
+                : Objects.requireNonNullElse(resolveScopeProxy(matchedScope, candidates), candidates.get(Math.floorMod(roundRobinIndex.getAndIncrement(), candidates.size())));
         };
 
         if (selected != null && host != null && !host.isBlank())
@@ -80,7 +80,7 @@ public final class ProxyRotationEngine
 
     public synchronized ProxyEntry rotateNow()
     {
-        List<ProxyEntry> candidates = activeProxies();
+        List<ProxyEntry> candidates = activeUpstreamProxies(false);
         if (candidates.isEmpty())
         {
             return null;
@@ -92,15 +92,15 @@ public final class ProxyRotationEngine
 
     public synchronized List<ProxyEntry> activeProxies()
     {
-        return activeProxies(false);
+        return activeUpstreamProxies(false);
     }
 
-    public synchronized List<ProxyEntry> activeProxies(boolean requiresConnect)
+    public synchronized List<ProxyEntry> activeUpstreamProxies(boolean requiresConnect)
     {
         List<ProxyEntry> candidates = new ArrayList<>();
         for (ProxyEntry proxy : state.proxies)
         {
-            if (proxy.enabled && proxy.status == ProxyStatus.ACTIVE)
+            if (proxy.enabled && proxy.status == ProxyStatus.ACTIVE && proxy.supportsConnect())
             {
                 if (!requiresConnect || proxy.supportsConnect())
                 {
@@ -109,6 +109,81 @@ public final class ProxyRotationEngine
             }
         }
         return candidates;
+    }
+
+    public synchronized RouteDecision chooseForwarder(String host)
+    {
+        List<ProxyEntry> candidates = activeForwarders();
+        if (candidates.isEmpty())
+        {
+            return new RouteDecision(null, null);
+        }
+
+        ScopeRule matchedScope = state.scopeRules.stream()
+            .filter(rule -> rule.matches(host))
+            .findFirst()
+            .orElse(null);
+
+        if (matchedScope != null)
+        {
+            ProxyEntry scopedForwarder = resolveScopeForwarder(matchedScope, candidates);
+            if (scopedForwarder != null)
+            {
+                stickyAssignments.put("forwarder:" + host, scopedForwarder.id);
+                persistStickyAssignments();
+                return new RouteDecision(scopedForwarder, matchedScope);
+            }
+        }
+
+        List<ProxyEntry> hostMatched = candidates.stream()
+            .filter(proxy -> host != null && host.equalsIgnoreCase(proxy.targetHost()))
+            .toList();
+        if (hostMatched.isEmpty())
+        {
+            return new RouteDecision(null, matchedScope);
+        }
+
+        ProxyEntry selected = switch (state.settings.rotationStrategy)
+        {
+            case RANDOM -> hostMatched.get(random.nextInt(hostMatched.size()));
+            case ROUND_ROBIN -> hostMatched.get(Math.floorMod(roundRobinIndex.getAndIncrement(), hostMatched.size()));
+            case LEAST_USED -> hostMatched.stream().min(Comparator.comparingLong(proxy -> proxy.requestsServed)).orElse(hostMatched.getFirst());
+            case STICKY_PER_HOST, PER_SCOPE_RULE -> stickyProxy("forwarder:" + host, hostMatched);
+        };
+        return new RouteDecision(selected, matchedScope);
+    }
+
+    public synchronized List<ProxyEntry> activeForwarders()
+    {
+        List<ProxyEntry> candidates = new ArrayList<>();
+        for (ProxyEntry proxy : state.proxies)
+        {
+            if (proxy.enabled && proxy.status == ProxyStatus.ACTIVE && proxy.isForwarder())
+            {
+                candidates.add(proxy);
+            }
+        }
+        return candidates;
+    }
+
+    public synchronized boolean isKnownForwarderHost(String host)
+    {
+        if (host == null || host.isBlank())
+        {
+            return false;
+        }
+
+        return activeForwarders().stream().anyMatch(proxy ->
+        {
+            try
+            {
+                return host.equalsIgnoreCase(java.net.URI.create(proxy.forwarderBaseUrl).getHost());
+            }
+            catch (IllegalArgumentException exception)
+            {
+                return false;
+            }
+        });
     }
 
     public synchronized void recordSuccess(ProxyEntry proxyEntry)
@@ -161,6 +236,29 @@ public final class ProxyRotationEngine
         }
 
         if (rule.preferredProvider != null)
+        {
+            return candidates.stream()
+                .filter(proxy -> proxy.providerType == rule.preferredProvider)
+                .findFirst()
+                .orElse(null);
+        }
+
+        return null;
+    }
+
+    private ProxyEntry resolveScopeForwarder(ScopeRule rule, List<ProxyEntry> candidates)
+    {
+        if (rule.assignedProxyId != null)
+        {
+            return candidates.stream()
+                .filter(proxy -> proxy.isForwarder())
+                .filter(proxy -> rule.assignedProxyId.equals(proxy.id))
+                .findFirst()
+                .orElse(null);
+        }
+
+        if (rule.preferredProvider == ProxyForgeModels.ProviderType.AWS_FIREPROX
+            || rule.preferredProvider == ProxyForgeModels.ProviderType.CLOUDFLARE_FLAREPROX)
         {
             return candidates.stream()
                 .filter(proxy -> proxy.providerType == rule.preferredProvider)

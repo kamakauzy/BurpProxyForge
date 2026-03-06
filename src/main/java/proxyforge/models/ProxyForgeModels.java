@@ -1,5 +1,6 @@
 package proxyforge.models;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -257,6 +258,29 @@ public final class ProxyForgeModels
         public boolean supportsConnect()
         {
             return proxyMode != ProxyMode.FORWARDER;
+        }
+
+        public boolean isForwarder()
+        {
+            return proxyMode == ProxyMode.FORWARDER;
+        }
+
+        public String targetHost()
+        {
+            if (targetBaseUrl == null || targetBaseUrl.isBlank())
+            {
+                return "";
+            }
+
+            try
+            {
+                URI uri = URI.create(targetBaseUrl);
+                return Objects.requireNonNullElse(uri.getHost(), "");
+            }
+            catch (IllegalArgumentException ignored)
+            {
+                return "";
+            }
         }
 
         public void markValidation(boolean success, String message)
