@@ -48,20 +48,7 @@ public final class ForwarderRewriteHttpHandler implements HttpHandler
 
         try
         {
-            URI forwarderUri = URI.create(forwarder.forwarderBaseUrl);
-            HttpService forwarderService = HttpService.httpService(
-                forwarderUri.getHost(),
-                forwarderUri.getPort() > 0 ? forwarderUri.getPort() : ("https".equalsIgnoreCase(forwarderUri.getScheme()) ? 443 : 80),
-                "https".equalsIgnoreCase(forwarderUri.getScheme()));
-
-            String newPath = combineForwarderPath(forwarderUri, request.pathWithoutQuery(), request.query());
-            HttpRequest rewritten = request.withService(forwarderService)
-                .withPath(newPath)
-                .withUpdatedHeader("Host", forwarderUri.getHost())
-                .withRemovedHeader("Proxy-Connection")
-                .withRemovedHeader("Proxy-Authorization")
-                .withUpdatedHeader("X-ProxyForge-Original-Host", originalHost)
-                .withUpdatedHeader("X-ProxyForge-Original-Scheme", request.httpService().secure() ? "https" : "http");
+            HttpRequest rewritten = rewriteRequest(request, forwarder, originalHost, request.httpService().secure());
 
             rewrittenRequests.put(request.messageId(), forwarder);
             logger.info("Rewrote " + originalHost + " through forwarder " + forwarder.name + " -> " + forwarder.forwarderBaseUrl);
@@ -74,6 +61,34 @@ public final class ForwarderRewriteHttpHandler implements HttpHandler
             logger.error("Unable to rewrite request through forwarder " + forwarder.name, exception);
             return RequestToBeSentAction.continueWith(request);
         }
+    }
+
+    static HttpRequest rewriteRequest(HttpRequest request, ProxyEntry forwarder, String originalHost, boolean originalSecure)
+    {
+        URI forwarderUri = URI.create(forwarder.forwarderBaseUrl);
+        HttpService forwarderService = HttpService.httpService(
+            forwarderUri.getHost(),
+            forwarderUri.getPort() > 0 ? forwarderUri.getPort() : ("https".equalsIgnoreCase(forwarderUri.getScheme()) ? 443 : 80),
+            "https".equalsIgnoreCase(forwarderUri.getScheme()));
+
+        String newPath = combineForwarderPath(forwarderUri, request.pathWithoutQuery(), request.query());
+        return applyForwarderHeaders(
+            request.withService(forwarderService)
+            .withPath(newPath)
+            .withUpdatedHeader("Host", forwarderUri.getHost()),
+            originalHost,
+            originalSecure);
+    }
+
+    static HttpRequest applyForwarderHeaders(HttpRequest request, String originalHost, boolean originalSecure)
+    {
+        return request
+            .withRemovedHeader("Proxy-Connection")
+            .withRemovedHeader("Proxy-Authorization")
+            .withRemovedHeader("X-ProxyForge-Original-Host")
+            .withRemovedHeader("X-ProxyForge-Original-Scheme")
+            .withAddedHeader("X-ProxyForge-Original-Host", originalHost)
+            .withAddedHeader("X-ProxyForge-Original-Scheme", originalSecure ? "https" : "http");
     }
 
     @Override
