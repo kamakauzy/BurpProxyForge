@@ -141,8 +141,7 @@ public class ProxyForgeExtension implements BurpExtension
     {
         try
         {
-            boolean hasUpstreamProxy = state.proxies.stream()
-                .anyMatch(proxy -> proxy.enabled && proxy.supportsConnect());
+            boolean hasUpstreamProxy = !rotationEngine.activeUpstreamProxies(true).isEmpty();
             boolean enableRule = state.settings.manageBurpUpstreamProxy && localProxyServer.isRunning() && hasUpstreamProxy;
             burpUpstreamProxyManager.syncManagedRule(enableRule, state.settings.localProxyPort);
             if (state.settings.manageBurpUpstreamProxy && !hasUpstreamProxy)

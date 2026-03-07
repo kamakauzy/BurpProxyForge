@@ -196,11 +196,17 @@ public final class ProxyForgeTab extends JPanel
         long activeCount = state.proxies.stream().filter(proxy -> proxy.enabled).count();
         long forwarderCount = state.proxies.stream().filter(ProxyEntry::isForwarder).count();
         long upstreamCount = state.proxies.stream().filter(ProxyEntry::supportsConnect).count();
+        long activeUpstreamCount = state.proxies.stream()
+            .filter(proxy -> proxy.enabled && proxy.supportsConnect() && proxy.status == proxyforge.models.ProxyForgeModels.ProxyStatus.ACTIVE)
+            .count();
         long totalRequests = state.proxies.stream().mapToLong(proxy -> proxy.requestsServed).sum();
         String selected = selectedProxy() == null ? "none" : selectedProxy().name;
+        String burpRuleState = state.settings.manageBurpUpstreamProxy
+            ? (actions.isProxyRunning() && activeUpstreamCount > 0 ? "managed-active" : "managed-inactive")
+            : "manual";
         statsLabel.setText(
             "Proxy server: " + (actions.isProxyRunning() ? "running" : "stopped")
-                + " | Burp rule: " + (state.settings.manageBurpUpstreamProxy ? "managed" : "manual")
+                + " | Burp rule: " + burpRuleState
                 + " | Pool: " + state.proxies.size()
                 + " total / " + activeCount + " enabled"
                 + " | Forwarders: " + forwarderCount

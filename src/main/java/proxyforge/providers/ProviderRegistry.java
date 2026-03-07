@@ -20,9 +20,11 @@ import software.amazon.awssdk.services.apigateway.model.CreateDeploymentRequest;
 import software.amazon.awssdk.services.apigateway.model.CreateResourceRequest;
 import software.amazon.awssdk.services.apigateway.model.CreateRestApiRequest;
 import software.amazon.awssdk.services.apigateway.model.DeleteRestApiRequest;
+import software.amazon.awssdk.services.apigateway.model.GetIntegrationRequest;
 import software.amazon.awssdk.services.apigateway.model.GetResourcesRequest;
 import software.amazon.awssdk.services.apigateway.model.GetRestApisRequest;
 import software.amazon.awssdk.services.apigateway.model.IntegrationType;
+import software.amazon.awssdk.services.apigateway.model.NotFoundException;
 import software.amazon.awssdk.services.apigateway.model.PutIntegrationRequest;
 import software.amazon.awssdk.services.apigateway.model.PutMethodRequest;
 import software.amazon.awssdk.services.apigateway.model.Resource;
@@ -35,6 +37,7 @@ import software.amazon.awssdk.services.ec2.model.TerminateInstancesRequest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -139,7 +142,7 @@ public final class ProviderRegistry
                 return ProviderResult.failure("AWS Fireprox requires a region.");
             }
 
-            try (ApiGatewayClient client = apiGatewayClient(request.fields()))
+            try (ApiGatewayClient client = apiGatewayClient(request.fields(), region))
             {
                 URI target = URI.create(targetUrl);
                 String apiName = "proxyforge-" + shortId();
@@ -201,13 +204,29 @@ public final class ProviderRegistry
                     .description("ProxyForge deployment")
                     .build());
 
+                String forwarderUrl = "https://" + apiId + ".execute-api." + region + ".amazonaws.com/proxy/";
+                ProviderResult verificationResult = verifyAwsFireproxForwarder(forwarderUrl);
+                if (!verificationResult.success())
+                {
+                    try
+                    {
+                        client.deleteRestApi(DeleteRestApiRequest.builder().restApiId(apiId).build());
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        logger.warn("Failed to clean up AWS Fireprox API after verification failure: " + cleanupException.getMessage());
+                    }
+                    return verificationResult;
+                }
+
                 ProxyEntry entry = ProxyEntry.forwarder(
                     ProviderType.AWS_FIREPROX,
                     apiName,
-                    "https://" + apiId + ".execute-api." + region + ".amazonaws.com/proxy/",
+                    forwarderUrl,
                     trimTrailingSlash(targetUrl));
                 entry.providerResourceId = apiId;
                 entry.metadata.put("region", region);
+                entry.metadata.put("targetUrl", targetUrl);
                 entry.metadata.put("apiName", apiName);
                 return ProviderResult.success("AWS Fireprox deployment created: " + entry.forwarderBaseUrl, entry);
             }
@@ -231,7 +250,7 @@ public final class ProviderRegistry
             {
                 return ProviderResult.failure("AWS list requires a region.");
             }
-            try (ApiGatewayClient client = apiGatewayClient(fields))
+            try (ApiGatewayClient client = apiGatewayClient(fields, region))
             {
                 List<ProxyEntry> entries = new ArrayList<>();
                 client.getRestApis(GetRestApisRequest.builder().limit(500).build()).items().forEach(api ->
@@ -242,13 +261,18 @@ public final class ProviderRegistry
                         return;
                     }
 
+                    String targetUrl = recoverAwsForwarderTarget(client, api.id());
                     ProxyEntry entry = ProxyEntry.forwarder(
                         ProviderType.AWS_FIREPROX,
                         name,
                         "https://" + api.id() + ".execute-api." + region + ".amazonaws.com/proxy/",
-                        "");
+                        targetUrl);
                     entry.providerResourceId = api.id();
                     entry.metadata.put("region", region);
+                    if (!targetUrl.isBlank())
+                    {
+                        entry.metadata.put("targetUrl", targetUrl);
+                    }
                     entries.add(entry);
                 });
                 return ProviderResult.successList("Loaded " + entries.size() + " AWS Fireprox API Gateway entries.", entries);
@@ -267,15 +291,20 @@ public final class ProviderRegistry
             {
                 return ProviderResult.failure("AWS delete requires both accessKey and secretKey.");
             }
-            if (isBlank(fields.get("region")))
+            String region = defaultString(proxyEntry.metadata.get("region"), trim(fields.get("region")));
+            if (isBlank(region))
             {
                 return ProviderResult.failure("AWS delete requires a region.");
             }
 
-            try (ApiGatewayClient client = apiGatewayClient(fields))
+            try (ApiGatewayClient client = apiGatewayClient(fields, region))
             {
                 client.deleteRestApi(DeleteRestApiRequest.builder().restApiId(proxyEntry.providerResourceId).build());
                 return ProviderResult.success("Deleted AWS Fireprox API " + proxyEntry.providerResourceId, proxyEntry);
+            }
+            catch (NotFoundException exception)
+            {
+                return ProviderResult.success("AWS Fireprox API " + proxyEntry.providerResourceId + " was already absent remotely; removed local entry.", proxyEntry);
             }
             catch (Exception exception)
             {
@@ -284,7 +313,7 @@ public final class ProviderRegistry
             }
         }
 
-        private ApiGatewayClient apiGatewayClient(Map<String, String> fields)
+        private ApiGatewayClient apiGatewayClient(Map<String, String> fields, String region)
         {
             String sessionToken = trim(fields.get("sessionToken"));
             StaticCredentialsProvider credentialsProvider;
@@ -302,7 +331,7 @@ public final class ProviderRegistry
 
             return ApiGatewayClient.builder()
                 .httpClientBuilder(UrlConnectionHttpClient.builder())
-                .region(Region.of(trim(fields.get("region"))))
+                .region(Region.of(region))
                 .credentialsProvider(credentialsProvider)
                 .build();
         }
@@ -549,7 +578,7 @@ public final class ProviderRegistry
         @Override
         public ProviderResult list(Map<String, String> fields)
         {
-            return ProviderResult.successList("Remote VPS listing is intentionally scoped to provider-specific state. Use local pool for active instances.", List.of());
+            return ProviderResult.failure("VPS remote listing is not supported yet.");
         }
 
         @Override
@@ -608,12 +637,18 @@ public final class ProviderRegistry
                     "DO VPS " + dropletId,
                     host,
                     3128,
-                    "",
+                    "proxyforge",
                     password);
                 entry.providerResourceId = dropletId;
                 entry.metadata.put("vendor", "digitalocean");
                 entry.metadata.put("region", region);
                 entry.metadata.put("instanceType", instanceType);
+                ProviderResult readinessResult = verifyHttpProxyReady(host, 3128, "proxyforge", password);
+                if (!readinessResult.success())
+                {
+                    deleteDigitalOceanDroplet(apiToken, dropletId, entry);
+                    return readinessResult;
+                }
                 return ProviderResult.success("DigitalOcean proxy ready at " + host + ":3128", entry);
             }
             catch (Exception exception)
@@ -660,12 +695,18 @@ public final class ProviderRegistry
                     "Linode VPS " + instanceId,
                     host,
                     3128,
-                    "",
+                    "proxyforge",
                     password);
                 entry.providerResourceId = instanceId;
                 entry.metadata.put("vendor", "linode");
                 entry.metadata.put("region", region);
                 entry.metadata.put("instanceType", instanceType);
+                ProviderResult readinessResult = verifyHttpProxyReady(host, 3128, "proxyforge", password);
+                if (!readinessResult.success())
+                {
+                    deleteLinodeInstance(apiToken, instanceId, entry);
+                    return readinessResult;
+                }
                 return ProviderResult.success("Linode proxy ready at " + host + ":3128", entry);
             }
             catch (Exception exception)
@@ -724,7 +765,7 @@ public final class ProviderRegistry
                     "EC2 VPS " + instanceId,
                     "",
                     3128,
-                    "",
+                    "proxyforge",
                     password);
                 entry.providerResourceId = instanceId;
                 entry.status = ProxyForgeModels.ProxyStatus.DEPLOYING;
@@ -750,6 +791,10 @@ public final class ProviderRegistry
                 .DELETE()
                 .build();
             HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 3, Duration.ofSeconds(1), logger);
+            if (response.statusCode() == 404)
+            {
+                return ProviderResult.success("DigitalOcean droplet " + resourceId + " was already absent remotely; removed local entry.", proxyEntry);
+            }
             if (response.statusCode() >= 300)
             {
                 return ProviderResult.failure("DigitalOcean delete failed: HTTP " + response.statusCode() + " " + response.body());
@@ -766,6 +811,10 @@ public final class ProviderRegistry
                 .DELETE()
                 .build();
             HttpResponse<String> response = ProxyForgeHttp.sendWithRetry(httpClient, request, 3, Duration.ofSeconds(1), logger);
+            if (response.statusCode() == 404)
+            {
+                return ProviderResult.success("Linode instance " + resourceId + " was already absent remotely; removed local entry.", proxyEntry);
+            }
             if (response.statusCode() >= 300)
             {
                 return ProviderResult.failure("Linode delete failed: HTTP " + response.statusCode() + " " + response.body());
@@ -1049,6 +1098,129 @@ public final class ProviderRegistry
         return ProviderResult.failure("Cloudflare forwarder did not become live at " + forwarderUrl + ": " + lastFailure);
     }
 
+    private ProviderResult verifyAwsFireproxForwarder(String forwarderUrl)
+    {
+        Instant deadline = Instant.now().plus(Duration.ofSeconds(45));
+        String lastFailure = "AWS Fireprox endpoint did not become reachable";
+
+        while (Instant.now().isBefore(deadline))
+        {
+            try
+            {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(forwarderUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("User-Agent", "ProxyForge/2")
+                    .GET()
+                    .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 500)
+                {
+                    return ProviderResult.success("Verified AWS Fireprox endpoint " + forwarderUrl, null);
+                }
+                lastFailure = response.statusCode() + " " + summarizeBody(response.body());
+            }
+            catch (Exception exception)
+            {
+                lastFailure = exception.getMessage();
+            }
+
+            try
+            {
+                Thread.sleep(3_000L);
+            }
+            catch (InterruptedException exception)
+            {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        return ProviderResult.failure("AWS Fireprox forwarder did not become live at " + forwarderUrl + ": " + lastFailure);
+    }
+
+    private ProviderResult verifyHttpProxyReady(String host, int port, String username, String password)
+    {
+        Instant deadline = Instant.now().plus(Duration.ofMinutes(2));
+        String lastFailure = "proxy readiness check timed out";
+
+        while (Instant.now().isBefore(deadline))
+        {
+            try (java.net.Socket socket = new java.net.Socket())
+            {
+                socket.connect(new InetSocketAddress(host, port), (int) HTTP_TIMEOUT.toMillis());
+                socket.setSoTimeout((int) HTTP_TIMEOUT.toMillis());
+                String request = "GET http://example.com/ HTTP/1.1\r\n"
+                    + "Host: example.com\r\n"
+                    + "Connection: close\r\n"
+                    + "Proxy-Authorization: Basic "
+                    + java.util.Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8))
+                    + "\r\n\r\n";
+                socket.getOutputStream().write(request.getBytes(StandardCharsets.ISO_8859_1));
+                socket.getOutputStream().flush();
+
+                byte[] responseBytes = socket.getInputStream().readNBytes(256);
+                String response = new String(responseBytes, StandardCharsets.ISO_8859_1);
+                if (response.startsWith("HTTP/1.1 407") || response.startsWith("HTTP/1.0 407"))
+                {
+                    lastFailure = "proxy returned authentication failure";
+                }
+                else if (response.startsWith("HTTP/1.1") || response.startsWith("HTTP/1.0"))
+                {
+                    return ProviderResult.success("Verified HTTP proxy readiness for " + host + ":" + port, null);
+                }
+                else
+                {
+                    lastFailure = "unexpected proxy response: " + summarizeBody(response);
+                }
+            }
+            catch (Exception exception)
+            {
+                lastFailure = exception.getMessage();
+            }
+
+            try
+            {
+                Thread.sleep(5_000L);
+            }
+            catch (InterruptedException exception)
+            {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        return ProviderResult.failure("HTTP proxy at " + host + ":" + port + " did not become ready: " + lastFailure);
+    }
+
+    private String recoverAwsForwarderTarget(ApiGatewayClient client, String restApiId)
+    {
+        try
+        {
+            for (Resource resource : client.getResources(GetResourcesRequest.builder().restApiId(restApiId).build()).items())
+            {
+                if ("/{proxy+}".equals(resource.path()))
+                {
+                    String uri = client.getIntegration(GetIntegrationRequest.builder()
+                        .restApiId(restApiId)
+                        .resourceId(resource.id())
+                        .httpMethod("ANY")
+                        .build()).uri();
+                    if (uri != null && uri.endsWith("/{proxy}"))
+                    {
+                        return uri.substring(0, uri.length() - "/{proxy}".length());
+                    }
+                    return Objects.requireNonNullElse(uri, "");
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.warn("Unable to recover AWS Fireprox target for API " + restApiId + ": " + exception.getMessage());
+        }
+        return "";
+    }
+
     private static String cloudflareErrors(JsonNode root)
     {
         List<String> errors = new ArrayList<>();
@@ -1166,7 +1338,7 @@ public final class ProviderRegistry
 
     private static String normalizeVendor(String vendor)
     {
-        return trim(vendor).toLowerCase(Locale.ROOT).replace("_", "");
+        return trim(vendor).toLowerCase(Locale.ROOT).replace("_", "").replace("-", "").replace(" ", "");
     }
 
     private static String defaultString(String value, String fallback)
