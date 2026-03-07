@@ -16,6 +16,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -31,8 +32,10 @@ class ProviderRegistryIntegrationTest
     {
         AtomicReference<String> uploadedBody = new AtomicReference<>("");
         AtomicReference<String> uploadedScriptName = new AtomicReference<>("");
+        AtomicReference<String> lastOriginalHostHeader = new AtomicReference<>("");
+        AtomicReference<String> lastOriginalSchemeHeader = new AtomicReference<>("");
 
-        try (LocalCloudflareFixture fixture = new LocalCloudflareFixture(uploadedBody, uploadedScriptName))
+        try (LocalCloudflareFixture fixture = new LocalCloudflareFixture(uploadedBody, uploadedScriptName, lastOriginalHostHeader, lastOriginalSchemeHeader))
         {
             HttpClient client = ProxyForgeHttp.newHttpClient(Duration.ofSeconds(5));
             ProviderRegistry registry = new ProviderRegistry(
@@ -58,6 +61,8 @@ class ProviderRegistryIntegrationTest
             assertEquals(1, fixture.subdomainPostCount.get());
             assertTrue(fixture.subdomainGetCount.get() >= 1);
             assertTrue(fixture.workerGetCount.get() >= 1);
+            assertEquals("securti360.com", lastOriginalHostHeader.get());
+            assertEquals("https", lastOriginalSchemeHeader.get());
         }
     }
 
@@ -66,14 +71,22 @@ class ProviderRegistryIntegrationTest
         private final HttpServer server;
         private final AtomicReference<String> uploadedBody;
         private final AtomicReference<String> uploadedScriptName;
+        private final AtomicReference<String> lastOriginalHostHeader;
+        private final AtomicReference<String> lastOriginalSchemeHeader;
         private final java.util.concurrent.atomic.AtomicInteger subdomainPostCount = new java.util.concurrent.atomic.AtomicInteger();
         private final java.util.concurrent.atomic.AtomicInteger subdomainGetCount = new java.util.concurrent.atomic.AtomicInteger();
         private final java.util.concurrent.atomic.AtomicInteger workerGetCount = new java.util.concurrent.atomic.AtomicInteger();
 
-        private LocalCloudflareFixture(AtomicReference<String> uploadedBody, AtomicReference<String> uploadedScriptName) throws IOException
+        private LocalCloudflareFixture(
+            AtomicReference<String> uploadedBody,
+            AtomicReference<String> uploadedScriptName,
+            AtomicReference<String> lastOriginalHostHeader,
+            AtomicReference<String> lastOriginalSchemeHeader) throws IOException
         {
             this.uploadedBody = uploadedBody;
             this.uploadedScriptName = uploadedScriptName;
+            this.lastOriginalHostHeader = lastOriginalHostHeader;
+            this.lastOriginalSchemeHeader = lastOriginalSchemeHeader;
             this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             this.server.setExecutor(Executors.newCachedThreadPool());
             this.server.createContext("/client/v4/accounts/test-account/workers/scripts", this::handleScripts);
@@ -126,12 +139,9 @@ class ProviderRegistryIntegrationTest
         private void handleWorker(HttpExchange exchange) throws IOException
         {
             workerGetCount.incrementAndGet();
+            lastOriginalHostHeader.set(Objects.requireNonNullElse(exchange.getRequestHeaders().getFirst("X-ProxyForge-Original-Host"), ""));
+            lastOriginalSchemeHeader.set(Objects.requireNonNullElse(exchange.getRequestHeaders().getFirst("X-ProxyForge-Original-Scheme"), ""));
             String body = uploadedBody.get();
-            if (body.contains("__DEFAULT_TARGET__"))
-            {
-                writeText(exchange, 500, "ProxyForge worker target not configured");
-                return;
-            }
             if (!body.contains("https://securti360.com"))
             {
                 writeText(exchange, 500, "Rendered target missing");

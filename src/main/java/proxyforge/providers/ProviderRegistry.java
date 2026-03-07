@@ -380,7 +380,7 @@ public final class ProviderRegistry
                 {
                     return subdomainResult;
                 }
-                ProviderResult verificationResult = verifyCloudflareForwarder(forwarderUrl);
+                ProviderResult verificationResult = verifyCloudflareForwarder(forwarderUrl, targetUrl);
                 if (!verificationResult.success())
                 {
                     return verificationResult;
@@ -1002,10 +1002,13 @@ public final class ProviderRegistry
         }
     }
 
-    private ProviderResult verifyCloudflareForwarder(String forwarderUrl)
+    private ProviderResult verifyCloudflareForwarder(String forwarderUrl, String targetUrl)
     {
         Instant deadline = Instant.now().plus(Duration.ofSeconds(45));
         String lastFailure = "Cloudflare forwarder endpoint did not become reachable";
+        URI targetUri = URI.create(targetUrl);
+        String originalHost = Objects.requireNonNullElse(targetUri.getHost(), "");
+        String originalScheme = Objects.requireNonNullElse(targetUri.getScheme(), "https");
 
         while (Instant.now().isBefore(deadline))
         {
@@ -1015,6 +1018,8 @@ public final class ProviderRegistry
                     .uri(URI.create(forwarderUrl))
                     .timeout(Duration.ofSeconds(10))
                     .header("User-Agent", "ProxyForge/2")
+                    .header("X-ProxyForge-Original-Host", originalHost)
+                    .header("X-ProxyForge-Original-Scheme", originalScheme)
                     .GET()
                     .build();
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
