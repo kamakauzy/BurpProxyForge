@@ -56,6 +56,7 @@ public final class ProxyForgeTab extends JPanel
     private final JComboBox<RotationStrategy> strategyCombo = new JComboBox<>();
     private final JTextField portField = new JTextField(6);
     private final JCheckBox autoStartCheck = new JCheckBox("Auto-start local proxy");
+    private final JCheckBox manageBurpUpstreamCheck = new JCheckBox("Enable Burp upstream rule");
     private final JCheckBox persistSensitiveCheck = new JCheckBox("Persist provider secrets");
     private final JCheckBox externalBindCheck = new JCheckBox("Bind to all interfaces");
     private final JButton restartProxyButton = new JButton("Start / Restart Proxy");
@@ -66,6 +67,7 @@ public final class ProxyForgeTab extends JPanel
     private final ProviderPanel awsPanel;
     private final ProviderPanel cloudflarePanel;
     private final ProviderPanel vpsPanel;
+    private boolean suppressSettingEvents;
 
     public ProxyForgeTab(ProxyForgeActions actions, ProxyForgeLogger logger)
     {
@@ -124,6 +126,13 @@ public final class ProxyForgeTab extends JPanel
 
         strategyCombo.setModel(new DefaultComboBoxModel<>(RotationStrategy.values()));
         restartProxyButton.addActionListener(event -> applySettings(true));
+        manageBurpUpstreamCheck.addActionListener(event ->
+        {
+            if (!suppressSettingEvents)
+            {
+                applySettings(false);
+            }
+        });
         stopProxyButton.addActionListener(event ->
         {
             actions.stopProxy();
@@ -165,11 +174,20 @@ public final class ProxyForgeTab extends JPanel
             }
         }
 
-        strategyCombo.setSelectedItem(state.settings.rotationStrategy);
-        portField.setText(String.valueOf(state.settings.localProxyPort));
-        autoStartCheck.setSelected(state.settings.autoStartProxy);
-        persistSensitiveCheck.setSelected(state.settings.persistSensitiveFields);
-        externalBindCheck.setSelected(state.settings.allowExternalBind);
+        suppressSettingEvents = true;
+        try
+        {
+            strategyCombo.setSelectedItem(state.settings.rotationStrategy);
+            portField.setText(String.valueOf(state.settings.localProxyPort));
+            autoStartCheck.setSelected(state.settings.autoStartProxy);
+            manageBurpUpstreamCheck.setSelected(state.settings.manageBurpUpstreamProxy);
+            persistSensitiveCheck.setSelected(state.settings.persistSensitiveFields);
+            externalBindCheck.setSelected(state.settings.allowExternalBind);
+        }
+        finally
+        {
+            suppressSettingEvents = false;
+        }
 
         awsPanel.load(state);
         cloudflarePanel.load(state);
@@ -182,6 +200,7 @@ public final class ProxyForgeTab extends JPanel
         String selected = selectedProxy() == null ? "none" : selectedProxy().name;
         statsLabel.setText(
             "Proxy server: " + (actions.isProxyRunning() ? "running" : "stopped")
+                + " | Burp rule: " + (state.settings.manageBurpUpstreamProxy ? "managed" : "manual")
                 + " | Pool: " + state.proxies.size()
                 + " total / " + activeCount + " enabled"
                 + " | Forwarders: " + forwarderCount
@@ -200,13 +219,14 @@ public final class ProxyForgeTab extends JPanel
 
             1. Configure one provider panel with valid cloud credentials and required deployment settings.
             2. Click Deploy to create one or more provider-managed routes and add them to the pool.
-            3. Set Burp upstream proxy rules to forward in-scope traffic to 127.0.0.1:8081 (or your configured local port).
+            3. Enable the Burp upstream rule checkbox to let ProxyForge manage Burp's project-level upstream rule automatically.
             4. Choose a rotation strategy, then click Start / Restart Proxy.
             5. Use Validate All to health-check the pool and Rotate Now to force a different selection.
 
             Notes:
             - Fireprox / Flareprox forwarders are selected inside Burp and rewritten automatically for matching hosts.
             - CONNECT tunnels are handled only by standard HTTP and SOCKS5 proxy entries.
+            - ProxyForge can add and remove the Burp upstream rule for you with the upstream-rule checkbox.
             - Sensitive provider fields stay in memory by default unless you enable persistence in Settings.
             """);
         textArea.setWrapStyleWord(true);
@@ -327,8 +347,10 @@ public final class ProxyForgeTab extends JPanel
         gbc.gridwidth = 4;
         panel.add(autoStartCheck, gbc);
         gbc.gridy = 2;
-        panel.add(persistSensitiveCheck, gbc);
+        panel.add(manageBurpUpstreamCheck, gbc);
         gbc.gridy = 3;
+        panel.add(persistSensitiveCheck, gbc);
+        gbc.gridy = 4;
         panel.add(externalBindCheck, gbc);
 
         JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -338,9 +360,9 @@ public final class ProxyForgeTab extends JPanel
         buttonRow.add(validateAllButton);
         buttonRow.add(helpButton);
 
-        gbc.gridy = 4;
-        panel.add(buttonRow, gbc);
         gbc.gridy = 5;
+        panel.add(buttonRow, gbc);
+        gbc.gridy = 6;
         panel.add(statsLabel, gbc);
         return panel;
     }
@@ -438,7 +460,14 @@ public final class ProxyForgeTab extends JPanel
         try
         {
             int port = Integer.parseInt(portField.getText().trim());
-            actions.updateSettings(port, (RotationStrategy) strategyCombo.getSelectedItem(), autoStartCheck.isSelected(), persistSensitiveCheck.isSelected(), externalBindCheck.isSelected(), restartProxy);
+            actions.updateSettings(
+                port,
+                (RotationStrategy) strategyCombo.getSelectedItem(),
+                autoStartCheck.isSelected(),
+                manageBurpUpstreamCheck.isSelected(),
+                persistSensitiveCheck.isSelected(),
+                externalBindCheck.isSelected(),
+                restartProxy);
             refresh();
         }
         catch (NumberFormatException exception)
@@ -465,9 +494,9 @@ public final class ProxyForgeTab extends JPanel
             - Per-scope rule: honor scope table mappings first.
 
             Upstream rule in Burp
-            - Destination host: *.*
-            - Proxy host: 127.0.0.1
-            - Proxy port: your configured local port (default 8081)
+            - Enable "Burp upstream rule" in ProxyForge to have the extension manage Burp's project-level upstream rule.
+            - The managed rule points Burp to 127.0.0.1 on the configured local port.
+            - Disable the checkbox to remove the managed rule again.
 
             Hybrid routing
             - Fireprox / Flareprox entries are forwarders. ProxyForge rewrites matching requests to those endpoints inside Burp.
@@ -526,7 +555,7 @@ public final class ProxyForgeTab extends JPanel
 
         void updateProviderFormState(ProviderType providerType, Map<String, String> fields);
 
-        void updateSettings(int port, RotationStrategy rotationStrategy, boolean autoStart, boolean persistSensitive, boolean allowExternalBind, boolean restartProxy);
+        void updateSettings(int port, RotationStrategy rotationStrategy, boolean autoStart, boolean manageBurpUpstream, boolean persistSensitive, boolean allowExternalBind, boolean restartProxy);
 
         void stopProxy();
 

@@ -116,6 +116,7 @@ public final class ProxyForgeModels
         public int localProxyPort = 8081;
         public RotationStrategy rotationStrategy = RotationStrategy.ROUND_ROBIN;
         public boolean autoStartProxy = true;
+        public boolean manageBurpUpstreamProxy = true;
         public boolean firstLaunch = true;
         public boolean persistSensitiveFields = false;
         public boolean allowExternalBind = false;

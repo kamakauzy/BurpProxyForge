@@ -17,6 +17,7 @@ import proxyforge.proxy.ForwarderRewriteHttpHandler;
 import proxyforge.proxy.LocalProxyServer;
 import proxyforge.proxy.ProxyRotationEngine;
 import proxyforge.ui.ProxyForgeTab;
+import proxyforge.utils.BurpUpstreamProxyManager;
 import proxyforge.utils.ProxyForgeHttp;
 import proxyforge.utils.ProxyForgeJson;
 import proxyforge.utils.ProxyForgeLogger;
@@ -39,6 +40,7 @@ public class ProxyForgeExtension implements BurpExtension
     private ExtensionState state;
     private ProxyRotationEngine rotationEngine;
     private ProviderRegistry providerRegistry;
+    private BurpUpstreamProxyManager burpUpstreamProxyManager;
     private LocalProxyServer localProxyServer;
     private ProxyForgeTab tab;
     private ExecutorService executorService;
@@ -53,6 +55,7 @@ public class ProxyForgeExtension implements BurpExtension
         this.state = persistence.load();
         this.rotationEngine = new ProxyRotationEngine(state);
         this.providerRegistry = new ProviderRegistry(logger);
+        this.burpUpstreamProxyManager = new BurpUpstreamProxyManager(api.burpSuite(), logger);
         this.localProxyServer = new LocalProxyServer(rotationEngine, logger, this::persistAndRefresh);
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -68,6 +71,10 @@ public class ProxyForgeExtension implements BurpExtension
         {
             startOrRestartProxy();
         }
+        else
+        {
+            syncBurpUpstreamRule();
+        }
 
         if (state.settings.firstLaunch)
         {
@@ -81,6 +88,7 @@ public class ProxyForgeExtension implements BurpExtension
     {
         try
         {
+            disableBurpUpstreamRuleQuietly();
             if (localProxyServer != null)
             {
                 localProxyServer.stop();
@@ -125,7 +133,33 @@ public class ProxyForgeExtension implements BurpExtension
         {
             logger.error("Unable to start local ProxyForge listener", exception);
         }
+        syncBurpUpstreamRule();
         persistAndRefresh();
+    }
+
+    private synchronized void syncBurpUpstreamRule()
+    {
+        try
+        {
+            boolean enableRule = state.settings.manageBurpUpstreamProxy && localProxyServer.isRunning();
+            burpUpstreamProxyManager.syncManagedRule(enableRule, state.settings.localProxyPort);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Unable to synchronize Burp upstream proxy rule", exception);
+        }
+    }
+
+    private synchronized void disableBurpUpstreamRuleQuietly()
+    {
+        try
+        {
+            burpUpstreamProxyManager.syncManagedRule(false, state.settings.localProxyPort);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Unable to disable Burp upstream proxy rule during cleanup", exception);
+        }
     }
 
     private synchronized ExtensionState snapshot()
@@ -262,6 +296,7 @@ public class ProxyForgeExtension implements BurpExtension
             int port,
             RotationStrategy rotationStrategy,
             boolean autoStart,
+            boolean manageBurpUpstreamProxy,
             boolean persistSensitive,
             boolean allowExternalBind,
             boolean restartProxy)
@@ -269,6 +304,7 @@ public class ProxyForgeExtension implements BurpExtension
             state.settings.localProxyPort = port;
             state.settings.rotationStrategy = rotationStrategy;
             state.settings.autoStartProxy = autoStart;
+            state.settings.manageBurpUpstreamProxy = manageBurpUpstreamProxy;
             state.settings.persistSensitiveFields = persistSensitive;
             state.settings.allowExternalBind = allowExternalBind;
             if (restartProxy)
@@ -277,6 +313,7 @@ public class ProxyForgeExtension implements BurpExtension
             }
             else
             {
+                syncBurpUpstreamRule();
                 persistAndRefresh();
             }
         }
@@ -285,6 +322,7 @@ public class ProxyForgeExtension implements BurpExtension
         public synchronized void stopProxy()
         {
             localProxyServer.stop();
+            syncBurpUpstreamRule();
             persistAndRefresh();
         }
 
