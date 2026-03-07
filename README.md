@@ -4,6 +4,9 @@
 
 ProxyForge is a Burp Suite Professional extension for managing and rotating upstream cloud-backed proxies from inside Burp. It provides a dedicated Montoya-powered Burp tab, a local routing proxy, provider panels for AWS Fireprox, Cloudflare Flareprox, and VPS-based proxies, plus a rotation engine that lets Burp traffic move through a managed proxy pool.
 
+brad@securit360.com
+https://www.securit360.com/ - we do pen testing!! 
+
 ## Highlights
 
 - Java 21 + Montoya API extension packaged as a single `ProxyForge.jar`
