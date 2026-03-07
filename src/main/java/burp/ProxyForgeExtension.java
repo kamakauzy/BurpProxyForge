@@ -141,8 +141,14 @@ public class ProxyForgeExtension implements BurpExtension
     {
         try
         {
-            boolean enableRule = state.settings.manageBurpUpstreamProxy && localProxyServer.isRunning();
+            boolean hasUpstreamProxy = state.proxies.stream()
+                .anyMatch(proxy -> proxy.enabled && proxy.supportsConnect());
+            boolean enableRule = state.settings.manageBurpUpstreamProxy && localProxyServer.isRunning() && hasUpstreamProxy;
             burpUpstreamProxyManager.syncManagedRule(enableRule, state.settings.localProxyPort);
+            if (state.settings.manageBurpUpstreamProxy && !hasUpstreamProxy)
+            {
+                logger.info("Burp upstream proxy rule left disabled because the current pool contains only forwarders.");
+            }
         }
         catch (Exception exception)
         {
@@ -191,6 +197,7 @@ public class ProxyForgeExtension implements BurpExtension
         {
             state.proxies.add(candidate);
         }
+        syncBurpUpstreamRule();
         persistAndRefresh();
     }
 
@@ -239,6 +246,7 @@ public class ProxyForgeExtension implements BurpExtension
     private synchronized void removeProxy(String proxyId)
     {
         state.proxies.removeIf(proxy -> proxy.id.equals(proxyId));
+        syncBurpUpstreamRule();
         persistAndRefresh();
     }
 

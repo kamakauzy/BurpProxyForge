@@ -226,7 +226,7 @@ public final class ProxyForgeTab extends JPanel
             Notes:
             - Fireprox / Flareprox forwarders are selected inside Burp and rewritten automatically for matching hosts.
             - CONNECT tunnels are handled only by standard HTTP and SOCKS5 proxy entries.
-            - ProxyForge can add and remove the Burp upstream rule for you with the upstream-rule checkbox.
+            - The Burp upstream rule is only needed when you have CONNECT-capable upstream proxies in the pool.
             - Sensitive provider fields stay in memory by default unless you enable persistence in Settings.
             """);
         textArea.setWrapStyleWord(true);
@@ -497,6 +497,7 @@ public final class ProxyForgeTab extends JPanel
             - Enable "Burp upstream rule" in ProxyForge to have the extension manage Burp's project-level upstream rule.
             - The managed rule points Burp to 127.0.0.1 on the configured local port.
             - Disable the checkbox to remove the managed rule again.
+            - If the pool only contains Fireprox / Flareprox forwarders, ProxyForge leaves the rule disabled because Burp can connect directly to the rewritten worker endpoint.
 
             Hybrid routing
             - Fireprox / Flareprox entries are forwarders. ProxyForge rewrites matching requests to those endpoints inside Burp.

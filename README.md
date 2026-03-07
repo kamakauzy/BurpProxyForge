@@ -36,7 +36,7 @@ ProxyForge is a Burp Suite Professional extension for managing and rotating upst
 ProxyForge now uses a hybrid routing architecture:
 
 1. Burp sends outbound traffic to the local ProxyForge listener with one upstream proxy rule:
-   - ProxyForge can manage this Burp project-level upstream proxy rule for you from inside the extension
+   - ProxyForge can manage this Burp project-level upstream proxy rule for you from inside the extension when CONNECT-capable upstream proxies are present
    - Default managed target: `127.0.0.1:8081`
 2. For VPS / HTTP / SOCKS proxy entries:
    - the local listener chooses a CONNECT-capable upstream proxy from the pool
@@ -182,7 +182,7 @@ You can either download a prebuilt `ProxyForge.jar` from **GitHub Releases / Act
 4. Click **Deploy**.
 5. In **Rotation Engine**, keep the default local port `8081`.
 6. Click **Start / Restart Proxy**.
-7. Enable **Burp upstream rule** if you want ProxyForge to add the Burp project-level rule automatically.
+7. Enable **Burp upstream rule** if you want ProxyForge to add the Burp project-level rule automatically when CONNECT-capable upstream proxies are present.
 8. Use scope rules or target-host matching to decide whether a request should use:
    - a forwarder entry (Fireprox / Flareprox), or
    - a CONNECT-capable upstream proxy (VPS / HTTP / SOCKS)
@@ -255,7 +255,7 @@ Hybrid routing behavior:
 - Settings, pool entries, provider form values, and scope rules persist across Burp restarts.
 - Sensitive provider values are kept in memory by default.
 - If **Persist provider secrets** is enabled, the current form fields are written through Burp's persistence layer as part of the extension state.
-- If **Burp upstream rule** is enabled, ProxyForge manages the Burp project-level upstream rule and removes it when disabled or unloaded.
+- If **Burp upstream rule** is enabled, ProxyForge manages the Burp project-level upstream rule when CONNECT-capable upstream proxies exist in the pool, and removes it when disabled or unloaded.
 - Automatic cleanup runs when the extension unloads.
 
 ## Local proxy behavior
