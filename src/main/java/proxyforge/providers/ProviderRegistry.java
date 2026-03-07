@@ -51,18 +51,27 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.BiFunction;
 
 public final class ProviderRegistry
 {
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(20);
 
     private final ProxyForgeLogger logger;
-    private final HttpClient httpClient = ProxyForgeHttp.newHttpClient(HTTP_TIMEOUT);
+    private final HttpClient httpClient;
+    private final RuntimeConfig runtimeConfig;
     private final Map<ProviderType, ProxyProvider> providers = new LinkedHashMap<>();
 
     public ProviderRegistry(ProxyForgeLogger logger)
     {
+        this(logger, ProxyForgeHttp.newHttpClient(HTTP_TIMEOUT), RuntimeConfig.production());
+    }
+
+    ProviderRegistry(ProxyForgeLogger logger, HttpClient httpClient, RuntimeConfig runtimeConfig)
+    {
         this.logger = logger;
+        this.httpClient = httpClient;
+        this.runtimeConfig = runtimeConfig;
         providers.put(ProviderType.AWS_FIREPROX, new AwsFireproxProvider());
         providers.put(ProviderType.CLOUDFLARE_FLAREPROX, new CloudflareFlareproxProvider());
         providers.put(ProviderType.VPS_FORGE, new VpsForgeProvider());
@@ -347,7 +356,7 @@ public final class ProviderRegistry
                     "application/javascript+module");
 
                 HttpRequest requestMessage = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName))
+                    .uri(URI.create(runtimeConfig.cloudflareApiBaseUrl() + "/accounts/" + accountId + "/workers/scripts/" + scriptName))
                     .timeout(HTTP_TIMEOUT)
                     .header("Authorization", "Bearer " + apiToken)
                     .header("Content-Type", "multipart/form-data; boundary=" + multipartBody.boundary())
@@ -421,7 +430,7 @@ public final class ProviderRegistry
             try
             {
                 HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts"))
+                    .uri(URI.create(runtimeConfig.cloudflareApiBaseUrl() + "/accounts/" + accountId + "/workers/scripts"))
                     .timeout(HTTP_TIMEOUT)
                     .header("Authorization", "Bearer " + apiToken)
                     .GET()
@@ -480,7 +489,7 @@ public final class ProviderRegistry
                 String apiToken = trim(fields.get("apiToken"));
                 String scriptName = defaultString(proxyEntry.metadata.get("scriptName"), proxyEntry.providerResourceId);
                 HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName))
+                    .uri(URI.create(runtimeConfig.cloudflareApiBaseUrl() + "/accounts/" + accountId + "/workers/scripts/" + scriptName))
                     .timeout(HTTP_TIMEOUT)
                     .header("Authorization", "Bearer " + apiToken)
                     .DELETE()
@@ -900,14 +909,14 @@ public final class ProviderRegistry
         return normalized;
     }
 
-    private static String workersDevEndpoint(String scriptName, String workersSubdomain)
+    private String workersDevEndpoint(String scriptName, String workersSubdomain)
     {
-        return "https://" + scriptName + "." + workersSubdomain + ".workers.dev/";
+        return runtimeConfig.cloudflareWorkersUrlBuilder().apply(scriptName, workersSubdomain);
     }
 
     private ProviderResult enableCloudflareWorkersDevSubdomain(String accountId, String apiToken, String scriptName)
     {
-        String endpoint = "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain";
+        String endpoint = runtimeConfig.cloudflareApiBaseUrl() + "/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain";
         String requestBody = "{\"enabled\":true,\"previews_enabled\":true}";
 
         try
@@ -960,7 +969,7 @@ public final class ProviderRegistry
         try
         {
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain"))
+                .uri(URI.create(runtimeConfig.cloudflareApiBaseUrl() + "/accounts/" + accountId + "/workers/scripts/" + scriptName + "/subdomain"))
                 .timeout(HTTP_TIMEOUT)
                 .header("Authorization", "Bearer " + apiToken)
                 .GET()
@@ -1092,6 +1101,40 @@ public final class ProviderRegistry
         }
         String singleLine = body.replaceAll("\\s+", " ").trim();
         return singleLine.length() > 160 ? singleLine.substring(0, 160) + "..." : singleLine;
+    }
+
+    static final class RuntimeConfig
+    {
+        private final String cloudflareApiBaseUrl;
+        private final BiFunction<String, String, String> cloudflareWorkersUrlBuilder;
+
+        private RuntimeConfig(String cloudflareApiBaseUrl, BiFunction<String, String, String> cloudflareWorkersUrlBuilder)
+        {
+            this.cloudflareApiBaseUrl = cloudflareApiBaseUrl;
+            this.cloudflareWorkersUrlBuilder = cloudflareWorkersUrlBuilder;
+        }
+
+        static RuntimeConfig production()
+        {
+            return new RuntimeConfig(
+                "https://api.cloudflare.com/client/v4",
+                (scriptName, workersSubdomain) -> "https://" + scriptName + "." + workersSubdomain + ".workers.dev/");
+        }
+
+        static RuntimeConfig forTests(String cloudflareApiBaseUrl, BiFunction<String, String, String> cloudflareWorkersUrlBuilder)
+        {
+            return new RuntimeConfig(cloudflareApiBaseUrl, cloudflareWorkersUrlBuilder);
+        }
+
+        String cloudflareApiBaseUrl()
+        {
+            return cloudflareApiBaseUrl;
+        }
+
+        BiFunction<String, String, String> cloudflareWorkersUrlBuilder()
+        {
+            return cloudflareWorkersUrlBuilder;
+        }
     }
 
     private static boolean isBlank(String value)
